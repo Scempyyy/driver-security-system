@@ -108,3 +108,32 @@ src/
 - **100% On-Device:** Video frames are processed in-memory in the browser sandbox. No video or sensor data ever leaves your device or touches any cloud server.
 - **Honesty & Safety:** Displays an explicit prototype notice: *"Prototype. Not a certified safety system. Estimates risk."*
 - **Explainability:** Every alert produces a "Why" card citing the top 3 contributing signals with real numeric measurements.
+
+
+---
+
+## 90-Second Hackathon Demo Script
+
+Follow this sequence for a reliable, judges-ready presentation:
+
+1. **Launch & Privacy Guarantee (0–15s):**
+   - Run `npm run dev` and navigate to `http://localhost:5173/`.
+   - Grant webcam permissions and point out the persistent green badge: **"On-device processing • No video leaves device"**.
+   - Select **"15s Quick Demo Calibration"** (or click **"Skip Calibration / Use Saved Profile"** for instant activation).
+2. **Normal State (15–30s):**
+   - Look straight ahead with eyes open.
+   - Point out the green indicators: Driver Risk low, Vehicle Signals nominal (`NORMAL`), Fused Risk = `0 NORMAL`.
+3. **Drowsiness & Alert Escalation (30–50s):**
+   - Close eyes for ~2 seconds: Notice indicator lights up.
+   - Repeat / hold closure: Watch it escalate to **`2 WARNING`**.
+   - The browser speaks the alert via SpeechSynthesis accompanied by the warning chime.
+   - Yawn (or click the quick simulation button): The **"Why" Explanation Card** immediately cites: *"Eyes closed 2.0s, Yawning detected"*.
+4. **Compound Escalation (The Hackathon Winner!) (50–75s):**
+   - While in the drowsy state, click **"Brake Judder"** in the Vehicle Signal Simulator.
+   - The system immediately compound-escalates to **`3 CRITICAL`** (loud alarm + spoken instruction: *"Critical: pull over safely"*).
+   - Point out the explanation card:  
+     > *"Prolonged Eye Closure (2.1s) + Severe Vibration Anomaly (0.85 m/s²). Risk raised because both appear together."*
+   - Highlight the clearly labeled **"[SIMULATED]"** badge and the simulated emergency family card.
+5. **Explainability & Review (75–90s):**
+   - Review the **Risk Timeline (Recharts)** showing the historical risk spike.
+   - Click into the **Alert Log** to inspect the diagnostic snapshot and factors behind every past alert.
