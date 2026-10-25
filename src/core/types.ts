@@ -28,6 +28,8 @@ export interface DriverFeatures {
   headYaw: number;          // Degrees: positive = turned right, negative = turned left
   headRoll: number;         // Degrees: positive = tilt right, negative = tilt left
   eyesOffRoadSec: number;   // Elapsed seconds looking away from road
+  slowBlinks60s?: number;   // Count of slow blinks (closure >= 0.4s) in last 60s
+  recentYawnCount?: number; // Count of confirmed yawns in rolling window
 }
 
 export type VehicleSignalSource = 'sensor' | 'simulated';
@@ -87,3 +89,10 @@ export interface PersonalBaseline {
 }
 
 export type VehicleScenarioPreset = 'NORMAL' | 'BRAKE_JUDDER' | 'ENGINE_KNOCK' | 'RUMBLE_STRIP';
+
+export interface VolumeSettings {
+  masterVolume: number; // 0 to 100%
+  soundVolume: number;  // 0 to 100%
+  voiceVolume: number;  // 0 to 100%
+  muted: boolean;
+}

@@ -7,6 +7,8 @@ import {
   PersonalBaseline,
   CalibrationMode,
   VehicleScenarioPreset,
+  RiskLevel,
+  VolumeSettings,
   RISK_LEVELS,
 } from '../core/types';
 import { DEFAULT_BASELINE_PROFILE, CONFIG } from '../core/config';
@@ -41,6 +43,8 @@ export interface NeuroDriveStore {
   // System & Audio Settings
   audioMuted: boolean;
   voiceEnabled: boolean;
+  volumeSettings: VolumeSettings;
+  silencedLevel: RiskLevel | null;
   selectedAlertForInspection: Alert | null;
 
   // Actions - Live State Updates
@@ -64,9 +68,12 @@ export interface NeuroDriveStore {
   setSimulatorPreset: (preset: VehicleScenarioPreset) => void;
   setManualSimulatedSignals: (vibrationRms: number, audioAnomaly: number) => void;
 
-  // Actions - Settings
+  // Actions - Settings & Volume
   setAudioMuted: (muted: boolean) => void;
   setVoiceEnabled: (enabled: boolean) => void;
+  setVolumeSettings: (settings: Partial<VolumeSettings>) => void;
+  silenceAlarm: () => void;
+  unSilenceAlarm: () => void;
 }
 
 const initialDriverFeatures: DriverFeatures = {
@@ -153,6 +160,31 @@ export const useNeuroDriveStore = create<NeuroDriveStore>((set) => ({
 
   audioMuted: false,
   voiceEnabled: true,
+  volumeSettings: (() => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const saved = window.localStorage.getItem(CONFIG.volume.storageKey);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          return {
+            masterVolume: typeof parsed.masterVolume === 'number' ? parsed.masterVolume : CONFIG.volume.defaultMasterVolume,
+            soundVolume: typeof parsed.soundVolume === 'number' ? parsed.soundVolume : CONFIG.volume.defaultSoundVolume,
+            voiceVolume: typeof parsed.voiceVolume === 'number' ? parsed.voiceVolume : CONFIG.volume.defaultVoiceVolume,
+            muted: Boolean(parsed.muted),
+          };
+        }
+      }
+    } catch {
+      // Fallback
+    }
+    return {
+      masterVolume: CONFIG.volume.defaultMasterVolume,
+      soundVolume: CONFIG.volume.defaultSoundVolume,
+      voiceVolume: CONFIG.volume.defaultVoiceVolume,
+      muted: CONFIG.volume.defaultMuted,
+    };
+  })(),
+  silencedLevel: null,
   selectedAlertForInspection: null,
 
   updateDriverFeatures: (features) =>
@@ -339,6 +371,52 @@ export const useNeuroDriveStore = create<NeuroDriveStore>((set) => ({
       },
     })),
 
-  setAudioMuted: (muted) => set({ audioMuted: muted }),
+  setAudioMuted: (muted) => {
+    set((state) => {
+      const updated = { ...state.volumeSettings, muted };
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          window.localStorage.setItem(CONFIG.volume.storageKey, JSON.stringify(updated));
+        }
+      } catch {}
+      return { audioMuted: muted, volumeSettings: updated };
+    });
+  },
+
   setVoiceEnabled: (enabled) => set({ voiceEnabled: enabled }),
+
+  setVolumeSettings: (partial) => {
+    set((state) => {
+      const updated = { ...state.volumeSettings, ...partial };
+      // Clamp 0-100
+      updated.masterVolume = Math.max(0, Math.min(100, updated.masterVolume));
+      updated.soundVolume = Math.max(0, Math.min(100, updated.soundVolume));
+      updated.voiceVolume = Math.max(0, Math.min(100, updated.voiceVolume));
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          window.localStorage.setItem(CONFIG.volume.storageKey, JSON.stringify(updated));
+        }
+      } catch {}
+      return {
+        volumeSettings: updated,
+        audioMuted: updated.muted,
+      };
+    });
+  },
+
+  silenceAlarm: () => {
+    set((state) => {
+      const currentLevel = state.riskAssessment.level;
+      // Mark current alert acknowledged
+      const updatedAlerts = state.alertHistory.map((a) =>
+        a.level === currentLevel ? { ...a, acknowledged: true } : a
+      );
+      return {
+        silencedLevel: currentLevel,
+        alertHistory: updatedAlerts,
+      };
+    });
+  },
+
+  unSilenceAlarm: () => set({ silencedLevel: null }),
 }));

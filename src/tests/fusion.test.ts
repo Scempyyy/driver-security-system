@@ -209,11 +209,12 @@ describe('M2: Risk Engine & Fusion Vitest Suite', () => {
 
   // ── Test 5: Hysteresis hold before downgrade ───────────────────────────────
   it('Test 5: Hysteresis hold must sustain lower risk for hysteresisHoldSec (3.0s) before downgrading', () => {
-    // Step 1: Trigger WARNING level at t = 1000
+    // Step 1: Trigger WARNING level at t = 1000 (10 slow blinks in 60s or PERCLOS 0.28)
     const warningDriver: DriverFeatures = {
       ...nominalDriver,
       t: 1000,
-      longClosureSec: 2.0,
+      slowBlinks60s: 10,
+      perclos60: 0.28,
     };
 
     const rWarning = evaluateRisk(warningDriver, nominalVehicle, DEFAULT_BASELINE_PROFILE);
@@ -245,12 +246,12 @@ describe('M2: Risk Engine & Fusion Vitest Suite', () => {
     expect(rDowngraded.assessment.level).toBe(RISK_LEVELS.NORMAL); // Successfully downgraded!
 
     // Step 5: Immediate escalation during hold
-    // If during hold a CRITICAL spike occurs, escalation happens immediately without delay
+    // If during hold a CRITICAL spike occurs (>= 5.0s closure), escalation happens immediately without delay
     const rHoldAgain = evaluateRisk(nominalT1, nominalVehicle, DEFAULT_BASELINE_PROFILE, rWarning.state);
     const spikeDriver: DriverFeatures = {
       ...nominalDriver,
       t: 2500,
-      longClosureSec: 3.5,
+      longClosureSec: 5.2,
     };
     const rSpike = evaluateRisk(spikeDriver, nominalVehicle, DEFAULT_BASELINE_PROFILE, rHoldAgain.state);
     expect(rSpike.assessment.level).toBe(RISK_LEVELS.CRITICAL);
@@ -301,5 +302,72 @@ describe('M2: Risk Engine & Fusion Vitest Suite', () => {
     expect(scoreToRiskLevel(0.30)).toBe(RISK_LEVELS.NOTICE);
     expect(scoreToRiskLevel(0.60)).toBe(RISK_LEVELS.WARNING);
     expect(scoreToRiskLevel(0.85)).toBe(RISK_LEVELS.CRITICAL);
+  });
+
+  // ── Specific 5 Rules Tests ─────────────────────────────────────────────────
+  describe('Rule Verification Tests', () => {
+    it('Rule 1: Continuous eye closure (2.0s NOTICE, 5.0s CRITICAL, ordinary blinks ignored)', () => {
+      // Ordinary blink (<0.5s closure) -> NORMAL
+      const blinkDriver: DriverFeatures = { ...nominalDriver, longClosureSec: 0.3 };
+      const rBlink = evaluateRisk(blinkDriver, nominalVehicle, DEFAULT_BASELINE_PROFILE);
+      expect(rBlink.assessment.level).toBe(RISK_LEVELS.NORMAL);
+
+      // Continuous closure for 2.0s -> silent NOTICE
+      const noticeDriver: DriverFeatures = { ...nominalDriver, longClosureSec: 2.0 };
+      const rNotice = evaluateRisk(noticeDriver, nominalVehicle, DEFAULT_BASELINE_PROFILE);
+      expect(rNotice.assessment.level).toBe(RISK_LEVELS.NOTICE);
+
+      // Continuous closure for 5.0s -> CRITICAL
+      const critDriver: DriverFeatures = { ...nominalDriver, longClosureSec: 5.0 };
+      const rCrit = evaluateRisk(critDriver, nominalVehicle, DEFAULT_BASELINE_PROFILE);
+      expect(rCrit.assessment.level).toBe(RISK_LEVELS.CRITICAL);
+    });
+
+    it('Rule 1 & 2: Slow blinks (3 slow blinks = NOTICE, 10 slow blinks = WARNING)', () => {
+      // 3 slow blinks within 60s -> NOTICE
+      const patternDriver: DriverFeatures = { ...nominalDriver, slowBlinks60s: 3 };
+      const rPattern = evaluateRisk(patternDriver, nominalVehicle, DEFAULT_BASELINE_PROFILE);
+      expect(rPattern.assessment.level).toBe(RISK_LEVELS.NOTICE);
+
+      // 10 slow blinks within 60s -> WARNING
+      const warningDriver: DriverFeatures = { ...nominalDriver, slowBlinks60s: 10 };
+      const rWarning = evaluateRisk(warningDriver, nominalVehicle, DEFAULT_BASELINE_PROFILE);
+      expect(rWarning.assessment.level).toBe(RISK_LEVELS.WARNING);
+    });
+
+    it('Rule 4: Head yaw only attention (3.0s NOTICE, 6.0s WARNING, glances ignored)', () => {
+      // Brief glance (e.g. 1.2s < 1.5s glance ignore) -> NORMAL
+      const glanceDriver: DriverFeatures = { ...nominalDriver, eyesOffRoadSec: 0.0 };
+      const rGlance = evaluateRisk(glanceDriver, nominalVehicle, DEFAULT_BASELINE_PROFILE);
+      expect(rGlance.assessment.level).toBe(RISK_LEVELS.NORMAL);
+
+      // Head turned for 3.0s -> NOTICE
+      const noticeHeadDriver: DriverFeatures = { ...nominalDriver, eyesOffRoadSec: 3.0 };
+      const rHeadNotice = evaluateRisk(noticeHeadDriver, nominalVehicle, DEFAULT_BASELINE_PROFILE);
+      expect(rHeadNotice.assessment.level).toBe(RISK_LEVELS.NOTICE);
+
+      // Head turned for 6.0s -> WARNING
+      const warningHeadDriver: DriverFeatures = { ...nominalDriver, eyesOffRoadSec: 6.0 };
+      const rHeadWarning = evaluateRisk(warningHeadDriver, nominalVehicle, DEFAULT_BASELINE_PROFILE);
+      expect(rHeadWarning.assessment.level).toBe(RISK_LEVELS.WARNING);
+    });
+
+    it('Rule 5: Yawns (single yawn adds factor only; 3 yawns = silent NOTICE; never WARNING/CRITICAL alone)', () => {
+      // Single yawn -> adds factor only, remains NORMAL
+      const singleYawnDriver: DriverFeatures = { ...nominalDriver, yawning: true, recentYawnCount: 1, mar: 0.65 };
+      const rSingle = evaluateRisk(singleYawnDriver, nominalVehicle, DEFAULT_BASELINE_PROFILE);
+      expect(rSingle.assessment.level).toBe(RISK_LEVELS.NORMAL);
+      expect(rSingle.assessment.factors.some((f) => f.id === 'yawn_detected')).toBe(true);
+
+      // 3 yawns in window -> silent NOTICE
+      const frequentYawnDriver: DriverFeatures = { ...nominalDriver, recentYawnCount: 3 };
+      const rFreq = evaluateRisk(frequentYawnDriver, nominalVehicle, DEFAULT_BASELINE_PROFILE);
+      expect(rFreq.assessment.level).toBe(RISK_LEVELS.NOTICE);
+
+      // Even 10 yawns alone NEVER escalate to WARNING or CRITICAL
+      const extremeYawnDriver: DriverFeatures = { ...nominalDriver, recentYawnCount: 10, yawning: true, mar: 0.70 };
+      const rExtreme = evaluateRisk(extremeYawnDriver, nominalVehicle, DEFAULT_BASELINE_PROFILE);
+      expect(rExtreme.assessment.level).toBe(RISK_LEVELS.NOTICE);
+    });
   });
 });

@@ -176,7 +176,7 @@ export const DriverGauges: React.FC = () => {
             <span className="text-gray-400">Eye Closure:</span>
             <span
               className={`font-semibold ${
-                driverFeatures.longClosureSec >= CONFIG.driver.longClosureWarningSec
+                driverFeatures.longClosureSec >= CONFIG.driver.longClosureCriticalSec
                   ? 'text-red-400'
                   : driverFeatures.longClosureSec >= CONFIG.driver.longClosureNoticeSec
                   ? 'text-yellow-400'

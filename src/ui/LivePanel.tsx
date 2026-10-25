@@ -33,7 +33,7 @@ export const LivePanel: React.FC<LivePanelProps> = ({
 
   const earThreshold = activeBaseline?.earThreshold ?? CONFIG.driver.earFallbackThreshold;
   const isEyeClosed = driverFeatures.faceDetected && driverFeatures.ear < earThreshold;
-  const isOffRoad = driverFeatures.faceDetected && driverFeatures.eyesOffRoadSec >= CONFIG.driver.eyesOffRoadNoticeSec;
+  const isOffRoad = driverFeatures.faceDetected && driverFeatures.eyesOffRoadSec >= CONFIG.driver.headYawNoticeSec;
   const isStreaming = cameraStatus === 'active';
 
   return (

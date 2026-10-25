@@ -78,20 +78,20 @@ export function evaluateRisk(
   const factors: Factor[] = [];
 
   // ── 1. Driver Features & Factor Calculation ──────────────────────────────
+  // 1a. Continuous Eye Closure (ordinary blinks < 0.5s are ignored completely)
   let longClosureRisk = 0;
   if (driverFeatures.longClosureSec >= CONFIG.driver.longClosureCriticalSec) {
-    longClosureRisk = 1.0;
-  } else if (driverFeatures.longClosureSec >= CONFIG.driver.longClosureWarningSec) {
-    const span = CONFIG.driver.longClosureCriticalSec - CONFIG.driver.longClosureWarningSec;
-    longClosureRisk = 0.65 + 0.35 * ((driverFeatures.longClosureSec - CONFIG.driver.longClosureWarningSec) / span);
+    longClosureRisk = 1.0; // >= 5.0s -> CRITICAL
   } else if (driverFeatures.longClosureSec >= CONFIG.driver.longClosureNoticeSec) {
-    const span = CONFIG.driver.longClosureWarningSec - CONFIG.driver.longClosureNoticeSec;
-    longClosureRisk = 0.35 + 0.30 * ((driverFeatures.longClosureSec - CONFIG.driver.longClosureNoticeSec) / span);
+    // 2.0s to 5.0s maps smoothly from NOTICE (0.35) to near CRITICAL (0.80)
+    const span = CONFIG.driver.longClosureCriticalSec - CONFIG.driver.longClosureNoticeSec;
+    longClosureRisk = 0.35 + 0.45 * ((driverFeatures.longClosureSec - CONFIG.driver.longClosureNoticeSec) / span);
   } else if (driverFeatures.longClosureSec > 0) {
-    longClosureRisk = 0.35 * (driverFeatures.longClosureSec / CONFIG.driver.longClosureNoticeSec);
+    // Below 2.0s: ordinary blinks (< 0.5s) or brief closures don't trigger alert alone
+    longClosureRisk = 0.20 * (driverFeatures.longClosureSec / CONFIG.driver.longClosureNoticeSec);
   }
 
-  if (driverFeatures.longClosureSec > 0) {
+  if (driverFeatures.longClosureSec >= 0.5) {
     factors.push({
       id: 'long_eye_closure',
       label: 'Prolonged Eye Closure',
@@ -100,6 +100,28 @@ export function evaluateRisk(
     });
   }
 
+  // 1b. Slow Blink Pattern / Warning (slow blink = closure >= 0.4s)
+  const slowBlinks = driverFeatures.slowBlinks60s ?? 0;
+  let slowBlinkRisk = 0;
+  if (slowBlinks >= CONFIG.driver.slowBlinkWarningCount) {
+    // 10 slow blinks within 60s -> WARNING
+    slowBlinkRisk = 0.70;
+  } else if (slowBlinks >= CONFIG.driver.slowBlinkPatternNoticeCount) {
+    // >= 3 slow blinks -> NOTICE pattern starting
+    const span = CONFIG.driver.slowBlinkWarningCount - CONFIG.driver.slowBlinkPatternNoticeCount;
+    slowBlinkRisk = 0.35 + 0.30 * ((slowBlinks - CONFIG.driver.slowBlinkPatternNoticeCount) / span);
+  }
+
+  if (slowBlinks >= CONFIG.driver.slowBlinkPatternNoticeCount) {
+    factors.push({
+      id: 'slow_blink_pattern',
+      label: 'Slow Blink Fatigue Pattern',
+      contribution: slowBlinkRisk * CONFIG.fusion.driverWeights.longClosure,
+      evidence: `${slowBlinks} slow blinks in 60 s`,
+    });
+  }
+
+  // 1c. PERCLOS
   let perclosRisk = 0;
   if (driverFeatures.perclos60 >= CONFIG.perclos.criticalThreshold) {
     perclosRisk = 1.0;
@@ -113,7 +135,7 @@ export function evaluateRisk(
     perclosRisk = 0.35 * (driverFeatures.perclos60 / CONFIG.perclos.noticeThreshold);
   }
 
-  if (driverFeatures.perclos60 > 0.05) {
+  if (driverFeatures.perclos60 >= CONFIG.perclos.noticeThreshold) {
     factors.push({
       id: 'perclos_high',
       label: 'High PERCLOS',
@@ -122,22 +144,34 @@ export function evaluateRisk(
     });
   }
 
+  // 1d. Yawning (single yawn NEVER triggers alarm/voice; >=3 within window gives silent NOTICE)
+  const recentYawns = driverFeatures.recentYawnCount ?? (driverFeatures.yawning ? 1 : 0);
   let yawnRisk = 0;
-  if (driverFeatures.yawning) {
-    yawnRisk = 0.85;
-  } else if (driverFeatures.mar > CONFIG.driver.marYawnThreshold) {
-    yawnRisk = 0.50;
+  if (recentYawns >= CONFIG.driver.yawnNoticeCount) {
+    // 3 yawns within window -> silent NOTICE (capped at 0.35 so yawns alone NEVER cause WARNING or CRITICAL)
+    yawnRisk = 0.35;
+  } else if (driverFeatures.yawning) {
+    // Single active yawn adds small factor only (0.15 contribution)
+    yawnRisk = 0.15;
   }
 
-  if (yawnRisk > 0) {
+  if (recentYawns >= CONFIG.driver.yawnNoticeCount) {
+    factors.push({
+      id: 'frequent_yawns',
+      label: 'Frequent Yawning',
+      contribution: yawnRisk * CONFIG.fusion.driverWeights.yawn,
+      evidence: `${recentYawns} yawns in recent window`,
+    });
+  } else if (driverFeatures.yawning) {
     factors.push({
       id: 'yawn_detected',
-      label: 'Yawning / Drowsiness',
+      label: 'Yawn Detected',
       contribution: yawnRisk * CONFIG.fusion.driverWeights.yawn,
       evidence: `Yawn detected (MAR ${driverFeatures.mar.toFixed(2)})`,
     });
   }
 
+  // 1e. Head Nodding
   const pitchDrop = driverFeatures.headPitch - baseline.headPitchOffset;
   let headNodRisk = 0;
   if (pitchDrop >= 25.0) {
@@ -157,49 +191,56 @@ export function evaluateRisk(
     });
   }
 
+  // 1f. Eyes Off Road (HEAD YAW ONLY, glances < 1.5s ignored)
   let attentionRisk = 0;
-  if (driverFeatures.eyesOffRoadSec >= CONFIG.driver.eyesOffRoadWarningSec) {
-    attentionRisk = 1.0;
-  } else if (driverFeatures.eyesOffRoadSec >= CONFIG.driver.eyesOffRoadNoticeSec) {
-    const span = CONFIG.driver.eyesOffRoadWarningSec - CONFIG.driver.eyesOffRoadNoticeSec;
-    attentionRisk = 0.50 + 0.50 * ((driverFeatures.eyesOffRoadSec - CONFIG.driver.eyesOffRoadNoticeSec) / span);
-  } else if (driverFeatures.eyesOffRoadSec > 0) {
-    attentionRisk = 0.50 * (driverFeatures.eyesOffRoadSec / CONFIG.driver.eyesOffRoadNoticeSec);
+  if (driverFeatures.eyesOffRoadSec >= CONFIG.driver.headYawWarningSec) {
+    // Turned > 25° for >= 6.0s -> WARNING
+    attentionRisk = 0.70;
+  } else if (driverFeatures.eyesOffRoadSec >= CONFIG.driver.headYawNoticeSec) {
+    // Turned > 25° for >= 3.0s -> NOTICE
+    const span = CONFIG.driver.headYawWarningSec - CONFIG.driver.headYawNoticeSec;
+    attentionRisk = 0.35 + 0.30 * ((driverFeatures.eyesOffRoadSec - CONFIG.driver.headYawNoticeSec) / span);
   }
 
-  if (attentionRisk > 0.20) {
+  if (driverFeatures.eyesOffRoadSec >= CONFIG.driver.headYawNoticeSec) {
     factors.push({
       id: 'attention_drift',
-      label: 'Eyes Off Road',
+      label: 'Eyes Off Road (Head Turned)',
       contribution: attentionRisk * CONFIG.fusion.driverWeights.attentionDrift,
-      evidence: `Eyes off road ${driverFeatures.eyesOffRoadSec.toFixed(1)} s`,
+      evidence: `Head turned off road ${driverFeatures.eyesOffRoadSec.toFixed(1)} s`,
     });
   }
 
   // Weighted composite driver risk
   const weightedDriverSum =
     longClosureRisk * CONFIG.fusion.driverWeights.longClosure +
+    slowBlinkRisk * CONFIG.fusion.driverWeights.longClosure +
     perclosRisk * CONFIG.fusion.driverWeights.perclos +
     yawnRisk * CONFIG.fusion.driverWeights.yawn +
     headNodRisk * CONFIG.fusion.driverWeights.headNod +
     attentionRisk * CONFIG.fusion.driverWeights.attentionDrift;
 
-  // Single dominant symptom floor (microsleep, severe perclos, or prolonged distraction)
+  // Dominant symptom floor
   let peakDriverRisk = 0;
-  if (driverFeatures.longClosureSec >= CONFIG.driver.longClosureCriticalSec || driverFeatures.perclos60 >= CONFIG.perclos.criticalThreshold) {
-    peakDriverRisk = Math.max(peakDriverRisk, 0.85);
-  } else if (
-    driverFeatures.longClosureSec >= CONFIG.driver.longClosureWarningSec ||
-    driverFeatures.perclos60 >= CONFIG.perclos.warningThreshold ||
-    driverFeatures.eyesOffRoadSec >= CONFIG.driver.eyesOffRoadWarningSec
+  if (
+    driverFeatures.longClosureSec >= CONFIG.driver.longClosureCriticalSec ||
+    driverFeatures.perclos60 >= CONFIG.perclos.criticalThreshold
   ) {
-    peakDriverRisk = Math.max(peakDriverRisk, 0.60);
+    peakDriverRisk = Math.max(peakDriverRisk, 0.85); // CRITICAL
+  } else if (
+    slowBlinks >= CONFIG.driver.slowBlinkWarningCount ||
+    driverFeatures.perclos60 >= CONFIG.perclos.warningThreshold ||
+    driverFeatures.eyesOffRoadSec >= CONFIG.driver.headYawWarningSec
+  ) {
+    peakDriverRisk = Math.max(peakDriverRisk, 0.65); // WARNING
   } else if (
     driverFeatures.longClosureSec >= CONFIG.driver.longClosureNoticeSec ||
+    slowBlinks >= CONFIG.driver.slowBlinkPatternNoticeCount ||
     driverFeatures.perclos60 >= CONFIG.perclos.noticeThreshold ||
-    driverFeatures.eyesOffRoadSec >= CONFIG.driver.eyesOffRoadNoticeSec
+    recentYawns >= CONFIG.driver.yawnNoticeCount ||
+    driverFeatures.eyesOffRoadSec >= CONFIG.driver.headYawNoticeSec
   ) {
-    peakDriverRisk = Math.max(peakDriverRisk, 0.30);
+    peakDriverRisk = Math.max(peakDriverRisk, 0.35); // NOTICE
   }
 
   const driverRisk = Math.min(1.0, Math.max(weightedDriverSum, peakDriverRisk));

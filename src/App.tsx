@@ -1,12 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Cpu,
-  Volume2,
-  VolumeX,
-  Mic,
   RotateCcw,
   Sparkles,
   Camera,
+  BellOff,
 } from 'lucide-react';
 import { useNeuroDriveStore } from './ui/store';
 import { RISK_LEVELS } from './core/types';
@@ -27,13 +25,17 @@ import { AlertLog } from './ui/AlertLog';
 import { CalibrationWizard } from './ui/CalibrationWizard';
 import { SimulatedFamilyNotification } from './ui/SimulatedFamilyNotification';
 import { PrivacyBadge } from './ui/PrivacyBadge';
+import { VolumeControl } from './ui/VolumeControl';
 
 export const App: React.FC = () => {
   const {
     audioMuted,
     setAudioMuted,
     voiceEnabled,
-    setVoiceEnabled,
+    silencedLevel,
+    silenceAlarm,
+    unSilenceAlarm,
+    riskAssessment,
     activeBaseline,
     addAlert,
     setRiskAssessment,
@@ -141,16 +143,26 @@ export const App: React.FC = () => {
       riskEngineStateRef.current = evaluation.state;
       setRiskAssessment(evaluation.assessment);
 
+      const store = useNeuroDriveStore.getState();
+      // Re-arm silenced alarm if risk level dropped to NORMAL or increased above previously silenced level
+      if (store.silencedLevel !== null) {
+        if (evaluation.assessment.level === RISK_LEVELS.NORMAL || evaluation.assessment.level > store.silencedLevel) {
+          unSilenceAlarm();
+        }
+      }
+
       // 4. Dispatch alert if engine fired one
       if (evaluation.alert) {
         addAlert(evaluation.alert);
+        const currentStore = useNeuroDriveStore.getState();
         alertDispatcher.dispatch(evaluation.alert.level, {
-          muted: useNeuroDriveStore.getState().audioMuted,
-          voiceEnabled: useNeuroDriveStore.getState().voiceEnabled,
+          volumeSettings: currentStore.volumeSettings,
+          silencedLevel: currentStore.silencedLevel,
+          voiceEnabled: currentStore.voiceEnabled,
         });
       }
     },
-    [activeBaseline, hideVideo, updateDriverFeatures, setRiskAssessment, addAlert]
+    [activeBaseline, hideVideo, updateDriverFeatures, setRiskAssessment, addAlert, unSilenceAlarm]
   );
 
   // Start live webcam stream and FaceLandmarker
@@ -216,6 +228,33 @@ export const App: React.FC = () => {
       eyesOffRoadSec: 0.0,
     });
   }, [updateDriverFeatures]);
+
+  // Keyboard shortcuts: Space / Esc to silence active alarm, M to toggle mute
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't intercept typing in inputs or sliders
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      if (e.code === 'Space' || e.key === 'Escape') {
+        const store = useNeuroDriveStore.getState();
+        if (store.riskAssessment.level >= RISK_LEVELS.WARNING && store.silencedLevel !== store.riskAssessment.level) {
+          e.preventDefault();
+          alertDispatcher.silence();
+          silenceAlarm();
+        }
+      } else if (e.key === 'm' || e.key === 'M') {
+        e.preventDefault();
+        const store = useNeuroDriveStore.getState();
+        const nextMuted = !store.volumeSettings.muted;
+        setAudioMuted(nextMuted);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [silenceAlarm, setAudioMuted]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -476,33 +515,49 @@ export const App: React.FC = () => {
             <span>Calibrate Baseline</span>
           </button>
 
-          {/* Audio Chimes Mute Toggle */}
-          <button
-            onClick={() => setAudioMuted(!audioMuted)}
-            className={`p-2 rounded-lg border text-xs transition-colors ${
-              audioMuted
-                ? 'bg-red-950/40 border-red-500/40 text-red-400'
-                : 'bg-gray-800 border-gray-700 text-gray-300 hover:text-white'
-            }`}
-            title={audioMuted ? 'Audio Alerts Muted' : 'Audio Alerts Active'}
-          >
-            {audioMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-          </button>
-
-          {/* Voice Alerts Toggle */}
-          <button
-            onClick={() => setVoiceEnabled(!voiceEnabled)}
-            className={`p-2 rounded-lg border text-xs transition-colors ${
-              voiceEnabled
-                ? 'bg-blue-950/40 border-blue-500/40 text-blue-400'
-                : 'bg-gray-800 border-gray-700 text-gray-500'
-            }`}
-            title={voiceEnabled ? 'Spoken Voice Alerts Enabled' : 'Spoken Voice Alerts Disabled'}
-          >
-            <Mic className="w-4 h-4" />
-          </button>
+          {/* Volume Settings Popup (replaces individual speaker/mic icons) */}
+          <VolumeControl />
         </div>
       </header>
+
+      {/* Prominent Active Alarm Silence Banner */}
+      {riskAssessment.level >= RISK_LEVELS.WARNING && silencedLevel !== riskAssessment.level && (
+        <div className="max-w-7xl w-full mb-6 p-4 rounded-xl bg-red-600/20 border-2 border-red-500/80 backdrop-blur shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-4 animate-pulse">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-lg bg-red-600 text-white shadow">
+              <BellOff className="w-6 h-6 animate-bounce" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-base font-bold text-red-100 uppercase tracking-wide">
+                  {riskAssessment.level === RISK_LEVELS.CRITICAL ? 'Critical Danger Alert' : 'Driver Warning Alert'}
+                </span>
+                <span className="text-xs px-2 py-0.5 rounded bg-red-500/30 text-red-200 border border-red-400/40 font-mono">
+                  ACTIVE
+                </span>
+              </div>
+              <p className="text-xs text-red-200/90 mt-0.5">
+                {riskAssessment.explanation || 'Audible alert and spoken warning are sounding.'}
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => {
+              alertDispatcher.silence();
+              silenceAlarm();
+            }}
+            className="w-full sm:w-auto px-6 py-3 rounded-xl bg-red-600 hover:bg-red-500 active:scale-95 text-white font-bold text-sm shadow-lg flex items-center justify-center gap-2 border border-red-300 transition-all cursor-pointer"
+            title="Silence audio alarm (Shortcut: Space or Esc)"
+          >
+            <BellOff className="w-5 h-5" />
+            <span>Silence Alarm</span>
+            <span className="text-[11px] px-2 py-0.5 rounded bg-red-700/80 border border-red-400 font-mono text-red-100 ml-1">
+              Space / Esc
+            </span>
+          </button>
+        </div>
+      )}
 
       {/* Demo Scenario Quick-Jump Bar */}
       <div className="max-w-7xl w-full bg-gray-900/60 border border-gray-800 rounded-xl p-3 mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">

@@ -26,35 +26,69 @@ export const CONFIG = {
   },
 
   driver: {
+    earSmoothingFrames: 4,          // Number of frames for EAR moving average smoothing
     earFallbackBaseline: 0.28,      // Used when uncalibrated
     earFallbackThreshold: 0.21,     // Fallback closure threshold if no baseline
-    longClosureNoticeSec: 1.0,      // Sustained closure >= 1.0s -> Notice
-    longClosureWarningSec: 1.8,     // Sustained closure >= 1.8s -> Warning
-    longClosureCriticalSec: 3.0,    // Sustained closure >= 3.0s -> Critical (severe microsleep)
+
+    // 1. Continuous Eye Closure Rules
+    // Ordinary blinks under 0.5s are ignored completely
+    longClosureNoticeSec: 2.0,       // Sustained closure >= 2.0s -> NOTICE (silent)
+    longClosureCriticalSec: 5.0,     // Sustained closure >= 5.0s -> CRITICAL
+
+    // Slow Blink Rules (ordinary blinks < 0.4s are ignored; normal rate 15-20/min)
+    slowBlinkDurationSec: 0.40,      // Eye closure duration >= 0.40s qualifies as a slow blink
+    slowBlinkWindowSec: 60,          // Rolling window to count slow blinks
+    slowBlinkPatternNoticeCount: 3,  // >= 3 slow blinks in 60s indicates pattern starting -> NOTICE
+    slowBlinkWarningCount: 10,       // 10 slow blinks in 60s -> WARNING (voice + chime)
+
+    // 4. Head Yaw Attention Rules (HEAD YAW ONLY, iris ignored for alert)
+    headYawSmoothingFrames: 5,       // Number of frames for head yaw moving average smoothing
+    headYawOffRoadDeg: 25.0,         // Head turned > 25° from calibrated forward
+    glanceIgnoreSec: 1.5,            // Glances shorter than 1.5s completely ignored (mirror checks)
+    headYawNoticeSec: 3.0,           // Head turned > 25° for >= 3.0s -> NOTICE
+    headYawWarningSec: 6.0,          // Head turned > 25° for >= 6.0s -> WARNING
+
+    // 5. Yawn Detection Rules
+    marYawnThreshold: 0.60,          // MAR above this indicates mouth open
+    yawnMinDurationSec: 1.5,         // Mouth must be open continuously >= 1.5s (not talking/laughing)
+    yawnNoticeCount: 3,              // 3 yawns within window trigger silent NOTICE
+    yawnWindowDemoSec: 120,          // 2 minutes window for 3 yawns in demo mode
+    yawnWindowFullSec: 600,          // 10 minutes window for 3 yawns in normal mode
+
+    headPitchNodDropDeg: 15.0,       // Pitch drop > 15 deg from baseline = nod
+    headNodMinDurationSec: 1.2,      // Must persist 1.2s to count as nod
     
-    marYawnThreshold: 0.60,         // MAR above this indicates mouth open
-    yawnMinDurationSec: 1.5,        // Must persist 1.5s to count as a yawn
+    blinkRateLowThreshold: 10,       // < 10 blinks/min suggests drowsiness
+    blinkRateHighThreshold: 32,      // > 32 blinks/min suggests fatigue flutter
     
-    headPitchNodDropDeg: 15.0,      // Pitch drop > 15 deg from baseline = nod
-    headNodMinDurationSec: 1.2,     // Must persist 1.2s to escalate quickly
-    
-    eyesOffRoadYawDeg: 25.0,        // Head yaw turned > 25 deg left or right
-    eyesOffRoadPitchUpDeg: -20.0,   // Head tilted far upward
-    eyesOffRoadNoticeSec: 2.0,      // Eyes off road >= 2.0s -> Notice
-    eyesOffRoadWarningSec: 3.5,     // Eyes off road >= 3.5s -> Warning
-    
-    blinkRateLowThreshold: 10,      // < 10 blinks/min suggests drowsiness
-    blinkRateHighThreshold: 32,     // > 32 blinks/min suggests fatigue flutter
-    
-    minQualityConfidence: 0.40,     // Face detection quality below 0.40 triggers low confidence
+    minQualityConfidence: 0.40,      // Face detection quality below 0.40 triggers low confidence
+  },
+
+  voice: {
+    // 2. Short, natural sentences with no colons, symbols, or numbers
+    noticeSpokenText: '',                                            // NOTICE: silent
+    warningSpokenText: 'You seem drowsy. Please take a break soon.', // WARNING
+    criticalSpokenText: 'Pull over safely.',                         // CRITICAL
+    speechRate: 0.95,
+    speechChimeDelayMs: 500,         // Play chime first, speak after ~0.5s
+    speechRepeatIntervalSec: 20,     // Repeat voice at most every 20s while level persists
+  },
+
+  volume: {
+    // Volume popup and persistence
+    storageKey: 'neurodrive_volume_settings_v1',
+    defaultMasterVolume: 70,         // 0 to 100%
+    defaultSoundVolume: 100,         // 0 to 100%
+    defaultVoiceVolume: 100,         // 0 to 100%
+    defaultMuted: false,
   },
 
   vehicle: {
-    normalVibrationRms: 0.12,       // Normal idle/smooth driving vibration (m/s^2)
-    vibrationAnomalyThreshold: 0.45,// Vibration RMS exceeding this triggers anomaly score
-    normalAudioRms: 0.08,           // Ambient cabin noise RMS
-    audioAnomalyThreshold: 0.35,    // Cabin noise exceeding this triggers anomaly score
-    anomalyPersistenceSec: 1.5,     // Vehicle anomaly must persist for 1.5s to influence risk
+    normalVibrationRms: 0.12,        // Normal idle/smooth driving vibration (m/s^2)
+    vibrationAnomalyThreshold: 0.45, // Vibration RMS exceeding this triggers anomaly score
+    normalAudioRms: 0.08,            // Ambient cabin noise RMS
+    audioAnomalyThreshold: 0.35,     // Cabin noise exceeding this triggers anomaly score
+    anomalyPersistenceSec: 1.5,      // Vehicle anomaly must persist for 1.5s to influence risk
   },
 
   fusion: {
@@ -85,15 +119,15 @@ export const CONFIG = {
     lowConfidenceCapLevel: RISK_LEVELS.NOTICE as RiskLevel,
     
     // Hysteresis & Cooldowns
-    hysteresisHoldSec: 3.0,         // Must stay below lower threshold for 3s before downgrading level
-    alertCooldownSec: 4.5,          // Minimum seconds between repeated audible alerts
-    voiceAlertCooldownSec: 6.0,     // Minimum seconds between spoken TTS voice alerts
+    hysteresisHoldSec: 3.0,          // Must stay below lower threshold for 3s before downgrading level
+    alertCooldownSec: 4.5,           // Minimum seconds between repeated audible alerts
+    voiceAlertCooldownSec: 20.0,     // Repeat voice at most every 20s while level persists
   },
 
   ui: {
-    throttleFps: 10,                // Throttle dashboard UI state updates to 10 Hz
-    riskTimelineWindowSec: 60,      // Show last 60 seconds of risk history on chart
-    audioBandsCount: 3,             // Low, Mid, High simple band bars
+    throttleFps: 10,                 // Throttle dashboard UI state updates to 10 Hz
+    riskTimelineWindowSec: 60,       // Show last 60 seconds of risk history on chart
+    audioBandsCount: 3,              // Low, Mid, High simple band bars
   },
 } as const;
 

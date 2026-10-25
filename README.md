@@ -118,22 +118,22 @@ Follow this sequence for a reliable, judges-ready presentation:
 
 1. **Launch & Privacy Guarantee (0–15s):**
    - Run `npm run dev` and navigate to `http://localhost:5173/`.
-   - Grant webcam permissions and point out the persistent green badge: **"On-device processing • No video leaves device"**.
-   - Select **"15s Quick Demo Calibration"** (or click **"Skip Calibration / Use Saved Profile"** for instant activation).
+   - Click **"Start Camera"** and grant webcam permission. Point out the mirrored video, live face mesh overlay, and the persistent badge: **"On-device processing • No video leaves device"**.
+   - Select **"Calibrate Baseline"** (15s Quick Demo Calibration), or click **"Skip / Load Saved Profile"** for instant activation.
 2. **Normal State (15–30s):**
-   - Look straight ahead with eyes open.
-   - Point out the green indicators: Driver Risk low, Vehicle Signals nominal (`NORMAL`), Fused Risk = `0 NORMAL`.
-3. **Drowsiness & Alert Escalation (30–50s):**
-   - Close eyes for ~2 seconds: Notice indicator lights up.
-   - Repeat / hold closure: Watch it escalate to **`2 WARNING`**.
-   - The browser speaks the alert via SpeechSynthesis accompanied by the warning chime.
-   - Yawn (or click the quick simulation button): The **"Why" Explanation Card** immediately cites: *"Eyes closed 2.0s, Yawning detected"*.
-4. **Compound Escalation (The Hackathon Winner!) (50–75s):**
-   - While in the drowsy state, click **"Brake Judder"** in the Vehicle Signal Simulator.
-   - The system immediately compound-escalates to **`3 CRITICAL`** (loud alarm + spoken instruction: *"Critical: pull over safely"*).
-   - Point out the explanation card:  
-     > *"Prolonged Eye Closure (2.1s) + Severe Vibration Anomaly (0.85 m/s²). Risk raised because both appear together."*
-   - Highlight the clearly labeled **"[SIMULATED]"** badge and the simulated emergency family card.
-5. **Explainability & Review (75–90s):**
-   - Review the **Risk Timeline (Recharts)** showing the historical risk spike.
-   - Click into the **Alert Log** to inspect the diagnostic snapshot and factors behind every past alert.
+   - Look straight ahead with eyes open. Blink normally: point out that ordinary blinks under 0.5s are completely ignored and do not trigger alarms.
+   - Point out the indicators: Driver Risk low, Vehicle Signals nominal (`NORMAL`), Fused Risk = `0 NORMAL`.
+3. **Continuous Closure & Silent Notice (30–45s):**
+   - Close eyes continuously for **2.0 seconds**: A silent yellow **NOTICE** visual banner triggers (no audio or voice).
+   - Point out the "Why" card explaining: *"Eyes closed 2.0 s"*.
+4. **Compound Escalation (The Hackathon Winner!) (45–65s):**
+   - While in the NOTICE state (eyes closed or slow blinks), click **"Brake Judder"** in the Vehicle Signal Simulator.
+   - The system immediately compound-escalates to **`2 WARNING`** (warning chime + spoken natural voice: *"You seem drowsy. Please take a break soon."*).
+   - Show the explanation card:
+     > *"Prolonged Eye Closure (2.0s) + Abnormal Vehicle Vibration for 2.0s. Risk raised because both appear together."*
+5. **Critical Microsleep & Silence Alarm (65–80s):**
+   - Keep eyes closed continuously for **5.0 seconds**: The system escalates to **`3 CRITICAL`** (urgent siren + *"Pull over safely."*).
+   - Point out the prominent red **"Silence Alarm"** banner. Press **`Space`** (or **`Esc`**) or click the button: sound and voice immediately stop, and the alert is marked acknowledged.
+6. **Volume Control & Post-Trip Review (80–90s):**
+   - Open the header **Volume Settings** popup: show master slider, alarm sound / voice sliders, mute toggle (shortcut **`M`**), and click **"Test Sound & Voice"**.
+   - Review the **Risk Timeline (Recharts)** showing the compound risk spike, and inspect historical items in the **Alert Log**.

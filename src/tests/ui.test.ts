@@ -139,15 +139,10 @@ describe('Tiered Alert Dispatcher (M4)', () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it('dispatches NOTICE alert without speech', async () => {
+  it('dispatches NOTICE alert silently without audio or speech', async () => {
     const spy = vi.spyOn(alertAudioPlayer, 'playAlert').mockResolvedValue();
     await alertDispatcher.dispatch(RISK_LEVELS.NOTICE);
-    expect(spy).toHaveBeenCalledWith(
-      RISK_LEVELS.NOTICE,
-      expect.objectContaining({
-        enableVoice: false,
-      })
-    );
+    expect(spy).not.toHaveBeenCalled();
   });
 
   it('dispatches WARNING alert with warning spoken text', async () => {
@@ -156,7 +151,7 @@ describe('Tiered Alert Dispatcher (M4)', () => {
     expect(spy).toHaveBeenCalledWith(
       RISK_LEVELS.WARNING,
       expect.objectContaining({
-        spokenText: 'Warning: driver drowsiness detected',
+        spokenText: CONFIG.voice.warningSpokenText,
         enableVoice: true,
       })
     );
@@ -168,7 +163,7 @@ describe('Tiered Alert Dispatcher (M4)', () => {
     expect(spy).toHaveBeenCalledWith(
       RISK_LEVELS.CRITICAL,
       expect.objectContaining({
-        spokenText: 'Critical: pull over safely',
+        spokenText: CONFIG.voice.criticalSpokenText,
         enableVoice: true,
       })
     );
@@ -185,6 +180,7 @@ describe('Tiered Alert Dispatcher (M4)', () => {
 
     // First call speaks
     await alertDispatcher.dispatch(RISK_LEVELS.WARNING, { voiceEnabled: true });
+    expect(spy).toHaveBeenCalledTimes(1);
     expect(spy).toHaveBeenLastCalledWith(
       RISK_LEVELS.WARNING,
       expect.objectContaining({
@@ -192,13 +188,8 @@ describe('Tiered Alert Dispatcher (M4)', () => {
       })
     );
 
-    // Immediate second call at same level should suppress speech due to cooldown
+    // Immediate second call at same level is suppressed due to 20s cooldown
     await alertDispatcher.dispatch(RISK_LEVELS.WARNING, { voiceEnabled: true });
-    expect(spy).toHaveBeenLastCalledWith(
-      RISK_LEVELS.WARNING,
-      expect.objectContaining({
-        enableVoice: false,
-      })
-    );
+    expect(spy).toHaveBeenCalledTimes(1); // not called again within repeat interval
   });
 });
