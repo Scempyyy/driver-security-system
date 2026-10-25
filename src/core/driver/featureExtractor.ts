@@ -17,7 +17,7 @@ import { DriverFeatures, PersonalBaseline } from '../types';
 import { CONFIG, DEFAULT_BASELINE_PROFILE } from '../config';
 import { calculateEAR, Point2D } from './ear';
 import { calculateMAR } from './mar';
-import { calculateHeadPose, HeadPose, MatrixInput } from './pose';
+import { calculateHeadPose, calculateHeadPoseFromLandmarks, HeadPose, MatrixInput } from './pose';
 import { PerclosTracker } from './perclos';
 import { BlinkTracker } from './blink';
 
@@ -172,11 +172,23 @@ export class FeatureExtractor {
 
     // 4. Head Pose Extraction & Smoothing
     let headPose: HeadPose = { pitch: 0, yaw: 0, roll: 0 };
+    let hasMatrixPose = false;
     if (data.matrix) {
       try {
         headPose = calculateHeadPose(data.matrix);
+        hasMatrixPose = true;
       } catch {
-        // Fallback to 0 if matrix malformed
+        // Fallback to landmark estimation
+      }
+    }
+
+    if (!hasMatrixPose && landmarks && landmarks.length >= 468) {
+      headPose = calculateHeadPoseFromLandmarks(landmarks);
+    } else if (hasMatrixPose && landmarks && landmarks.length >= 468) {
+      // Validate matrix yaw with landmark yaw to prevent dead zones
+      const lmPose = calculateHeadPoseFromLandmarks(landmarks);
+      if (Math.abs(headPose.yaw) < 5 && Math.abs(lmPose.yaw) > 18) {
+        headPose.yaw = lmPose.yaw;
       }
     }
 

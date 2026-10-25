@@ -160,3 +160,66 @@ export function createPoseMatrix(pitchDeg: number, yawDeg: number, rollDeg: numb
     0,   0,   0,   1,
   ];
 }
+
+export interface Landmark3DPoint {
+  x: number;
+  y: number;
+  z?: number;
+}
+
+/**
+ * Calculates head pose directly from 2D/3D landmarks as a reliable fallback
+ * when matrix is absent or inaccurate during steep head turns.
+ * Uses key facial landmarks:
+ * - Nose tip: landmark 1
+ * - Left eye outer corner: landmark 263
+ * - Right eye outer corner: landmark 33
+ * - Chin: landmark 152
+ * - Forehead / glabella: landmark 10
+ */
+export function calculateHeadPoseFromLandmarks(landmarks: Landmark3DPoint[]): HeadPose {
+  if (!landmarks || landmarks.length < 468) {
+    return { pitch: 0, yaw: 0, roll: 0 };
+  }
+
+  const nose = landmarks[1];
+  const leftEye = landmarks[263];
+  const rightEye = landmarks[33];
+  const chin = landmarks[152];
+  const forehead = landmarks[10];
+
+  if (!nose || !leftEye || !rightEye || !chin || !forehead) {
+    return { pitch: 0, yaw: 0, roll: 0 };
+  }
+
+  // Eye distance
+  const eyeDistance = Math.hypot(leftEye.x - rightEye.x, leftEye.y - rightEye.y);
+
+  // Face vertical span
+  const faceHeight = Math.hypot(forehead.x - chin.x, forehead.y - chin.y);
+
+  // Yaw estimation: asymmetry of nose position relative to eye outer corners
+  // At neutral forward, nose is centered between eyes.
+  // When turned right (+yaw), nose shifts closer to leftEye (in image coords).
+  const dLeft = Math.hypot(nose.x - leftEye.x, nose.y - leftEye.y);
+  const dRight = Math.hypot(nose.x - rightEye.x, nose.y - rightEye.y);
+  const yawRatio = eyeDistance > 0 ? (dRight - dLeft) / eyeDistance : 0;
+  // Scale factor: empirical mapping from nose offset ratio to degrees (~75 deg at extreme turn)
+  const landmarkYaw = Math.max(-85, Math.min(85, yawRatio * 75));
+
+  // Pitch estimation: nose vertical displacement relative to midpoint of forehead and chin
+  const faceMidY = (forehead.y + chin.y) / 2;
+  const pitchRatio = faceHeight > 0 ? (nose.y - faceMidY) / faceHeight : 0;
+  const landmarkPitch = Math.max(-60, Math.min(60, (pitchRatio - 0.05) * 80));
+
+  // Roll estimation: eye tilt angle
+  const dx = leftEye.x - rightEye.x;
+  const dy = leftEye.y - rightEye.y;
+  const landmarkRoll = Math.atan2(dy, dx) * (180 / Math.PI);
+
+  return {
+    pitch: landmarkPitch,
+    yaw: landmarkYaw,
+    roll: landmarkRoll,
+  };
+}

@@ -335,19 +335,19 @@ describe('M2: Risk Engine & Fusion Vitest Suite', () => {
       expect(rWarning.assessment.level).toBe(RISK_LEVELS.WARNING);
     });
 
-    it('Rule 4: Head yaw only attention (3.0s NOTICE, 6.0s WARNING, glances ignored)', () => {
-      // Brief glance (e.g. 1.2s < 1.5s glance ignore) -> NORMAL
+    it('Rule 4: Head yaw only attention (1.5s NOTICE, 3.0s WARNING, glances ignored)', () => {
+      // Brief glance (e.g. 0.5s < 0.8s glance ignore) -> NORMAL
       const glanceDriver: DriverFeatures = { ...nominalDriver, eyesOffRoadSec: 0.0 };
       const rGlance = evaluateRisk(glanceDriver, nominalVehicle, DEFAULT_BASELINE_PROFILE);
       expect(rGlance.assessment.level).toBe(RISK_LEVELS.NORMAL);
 
-      // Head turned for 3.0s -> NOTICE
-      const noticeHeadDriver: DriverFeatures = { ...nominalDriver, eyesOffRoadSec: 3.0 };
+      // Head turned for 1.5s -> NOTICE
+      const noticeHeadDriver: DriverFeatures = { ...nominalDriver, eyesOffRoadSec: 1.5 };
       const rHeadNotice = evaluateRisk(noticeHeadDriver, nominalVehicle, DEFAULT_BASELINE_PROFILE);
       expect(rHeadNotice.assessment.level).toBe(RISK_LEVELS.NOTICE);
 
-      // Head turned for 6.0s -> WARNING
-      const warningHeadDriver: DriverFeatures = { ...nominalDriver, eyesOffRoadSec: 6.0 };
+      // Head turned for 3.0s -> WARNING (triggers voice alert + chime)
+      const warningHeadDriver: DriverFeatures = { ...nominalDriver, eyesOffRoadSec: 3.0 };
       const rHeadWarning = evaluateRisk(warningHeadDriver, nominalVehicle, DEFAULT_BASELINE_PROFILE);
       expect(rHeadWarning.assessment.level).toBe(RISK_LEVELS.WARNING);
     });

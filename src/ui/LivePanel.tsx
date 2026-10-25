@@ -33,7 +33,6 @@ export const LivePanel: React.FC<LivePanelProps> = ({
 
   const earThreshold = activeBaseline?.earThreshold ?? CONFIG.driver.earFallbackThreshold;
   const isEyeClosed = driverFeatures.faceDetected && driverFeatures.ear < earThreshold;
-  const isOffRoad = driverFeatures.faceDetected && driverFeatures.eyesOffRoadSec >= CONFIG.driver.headYawNoticeSec;
   const isStreaming = cameraStatus === 'active';
 
   return (
@@ -181,17 +180,23 @@ export const LivePanel: React.FC<LivePanelProps> = ({
               </span>
             </div>
 
-            {/* Gaze / Attention badge */}
+            {/* Gaze / Attention badge with 3s distraction countdown */}
             <div
               className={`flex items-center gap-1.5 px-2 py-1 rounded backdrop-blur text-[11px] font-mono border ${
-                isOffRoad
-                  ? 'bg-red-950/80 text-red-300 border-red-500/40'
+                driverFeatures.eyesOffRoadSec >= 3.0
+                  ? 'bg-red-600/40 text-red-200 border-red-500 animate-pulse font-bold'
+                  : driverFeatures.eyesOffRoadSec > 0
+                  ? 'bg-amber-950/80 text-amber-300 border-amber-500/40'
                   : 'bg-black/60 text-emerald-300 border-white/10'
               }`}
             >
               <Eye className="w-3.5 h-3.5" />
               <span>
-                {isOffRoad ? `Eyes Off Road (${driverFeatures.eyesOffRoadSec.toFixed(1)}s)` : 'Gaze Forward'}
+                {driverFeatures.eyesOffRoadSec >= 3.0
+                  ? `🚨 Distracted: ${driverFeatures.eyesOffRoadSec.toFixed(1)}s (ALARM)`
+                  : driverFeatures.eyesOffRoadSec > 0
+                  ? `⚠️ Distraction: ${driverFeatures.eyesOffRoadSec.toFixed(1)}s / 3.0s`
+                  : 'Gaze Forward'}
               </span>
             </div>
 

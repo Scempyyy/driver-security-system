@@ -89,13 +89,13 @@ export function renderFaceMesh(
   };
 
   // 1. Face Oval
-  const ovalColor = options.isOffRoad ? 'rgba(239, 68, 68, 0.6)' : 'rgba(56, 189, 248, 0.45)';
+  const ovalColor = options.isOffRoad ? 'rgba(239, 68, 68, 0.7)' : 'rgba(56, 189, 248, 0.6)';
   drawPath(FACE_OVAL, ovalColor, 2, true);
 
   // 2. Eyebrows & Nose
-  drawPath(LEFT_EYEBROW, 'rgba(148, 163, 184, 0.6)', 1.5);
-  drawPath(RIGHT_EYEBROW, 'rgba(148, 163, 184, 0.6)', 1.5);
-  drawPath(NOSE_BRIDGE, 'rgba(148, 163, 184, 0.5)', 1.5);
+  drawPath(LEFT_EYEBROW, 'rgba(148, 163, 184, 0.7)', 1.5);
+  drawPath(RIGHT_EYEBROW, 'rgba(148, 163, 184, 0.7)', 1.5);
+  drawPath(NOSE_BRIDGE, 'rgba(148, 163, 184, 0.7)', 1.5);
 
   // 3. Eyes (Green = open, Red = closed)
   const eyeColor = options.isEyeClosed ? '#ef4444' : '#10b981';
@@ -120,7 +120,32 @@ export function renderFaceMesh(
   const mouthColor = options.isYawning ? '#f59e0b' : '#38bdf8';
   drawPath(MOUTH_OUTLINE, mouthColor, options.isYawning ? 3 : 1.5, true);
 
-  // 6. Gaze ray vector from nose tip (landmark 1)
+  // 6. Draw visible facial landmark dots across key facial features so the mesh is unmistakable
+  const dotColor = options.isOffRoad ? 'rgba(239, 68, 68, 0.65)' : 'rgba(56, 189, 248, 0.55)';
+  ctx.fillStyle = dotColor;
+  const keyLandmarkIndices = [
+    // Oval perimeter sample
+    10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152,
+    148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109,
+    // Nose
+    1, 2, 4, 5, 6, 19, 94, 168, 195, 197,
+    // Cheeks & Jaw
+    116, 123, 147, 213, 345, 352, 376, 433, 50, 280,
+    // Eyebrows
+    70, 63, 105, 66, 107, 336, 296, 334, 293, 300,
+  ];
+
+  for (const idx of keyLandmarkIndices) {
+    const pt = landmarks[idx];
+    if (pt) {
+      const { x, y } = toPx(pt);
+      ctx.beginPath();
+      ctx.arc(x, y, 1.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // 7. Gaze ray vector from nose tip (landmark 1)
   const nosePt = landmarks[1];
   if (nosePt) {
     const nose = toPx(nosePt);

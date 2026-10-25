@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useNeuroDriveStore } from './ui/store';
 import { RISK_LEVELS } from './core/types';
+import { CONFIG } from './core/config';
 import { alertDispatcher } from './io/speech/alertDispatcher';
 import { CameraManager, CameraStatus } from './io/camera/cameraManager';
 import { FeatureExtractor } from './core/driver/featureExtractor';
@@ -155,10 +156,21 @@ export const App: React.FC = () => {
       if (evaluation.alert) {
         addAlert(evaluation.alert);
         const currentStore = useNeuroDriveStore.getState();
+
+        // Check if primary factor is attention drift / off road
+        const isOffRoadAlert = evaluation.assessment.factors.some(
+          (f) => f.id === 'attention_drift' && f.contribution >= 0.20
+        );
+        const customMessage =
+          evaluation.alert.level === RISK_LEVELS.WARNING && isOffRoadAlert
+            ? CONFIG.voice.distractionSpokenText
+            : undefined;
+
         alertDispatcher.dispatch(evaluation.alert.level, {
           volumeSettings: currentStore.volumeSettings,
           silencedLevel: currentStore.silencedLevel,
           voiceEnabled: currentStore.voiceEnabled,
+          customMessage,
         });
       }
     },

@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { calculateHeadPose, createPoseMatrix, extractRotationMatrix } from '../core/driver/pose';
+import {
+  calculateHeadPose,
+  calculateHeadPoseFromLandmarks,
+  createPoseMatrix,
+  extractRotationMatrix,
+} from '../core/driver/pose';
 
 describe('Head Pose Extraction & Euler Angles', () => {
   it('identifies identity matrix as zero pitch, yaw, roll', () => {
@@ -69,5 +74,30 @@ describe('Head Pose Extraction & Euler Angles', () => {
     expect(pose2D.pitch).toBeCloseTo(10, 2);
     expect(pose2D.yaw).toBeCloseTo(-12, 2);
     expect(pose2D.roll).toBeCloseTo(8, 2);
+  });
+
+  it('calculates head pose from 2D/3D landmarks as a fallback', () => {
+    // Generate synthetic 478 landmarks
+    const lms = Array.from({ length: 478 }, () => ({ x: 0.5, y: 0.5, z: 0 }));
+
+    // Neutral face setup
+    lms[1] = { x: 0.5, y: 0.5, z: 0 };    // Nose
+    lms[263] = { x: 0.6, y: 0.45, z: 0 }; // Left eye
+    lms[33] = { x: 0.4, y: 0.45, z: 0 };  // Right eye
+    lms[152] = { x: 0.5, y: 0.7, z: 0 };  // Chin
+    lms[10] = { x: 0.5, y: 0.2, z: 0 };   // Forehead
+
+    const neutral = calculateHeadPoseFromLandmarks(lms);
+    expect(neutral.yaw).toBeCloseTo(0, 1);
+
+    // Turned right: nose shifts towards left eye (in image coords: x increases)
+    lms[1] = { x: 0.56, y: 0.5, z: 0 };
+    const turnedRight = calculateHeadPoseFromLandmarks(lms);
+    expect(turnedRight.yaw).toBeGreaterThan(20);
+
+    // Turned left: nose shifts towards right eye (in image coords: x decreases)
+    lms[1] = { x: 0.44, y: 0.5, z: 0 };
+    const turnedLeft = calculateHeadPoseFromLandmarks(lms);
+    expect(turnedLeft.yaw).toBeLessThan(-20);
   });
 });

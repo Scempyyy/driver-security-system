@@ -42,11 +42,11 @@ export const CONFIG = {
     slowBlinkWarningCount: 10,       // 10 slow blinks in 60s -> WARNING (voice + chime)
 
     // 4. Head Yaw Attention Rules (HEAD YAW ONLY, iris ignored for alert)
-    headYawSmoothingFrames: 5,       // Number of frames for head yaw moving average smoothing
-    headYawOffRoadDeg: 25.0,         // Head turned > 25° from calibrated forward
-    glanceIgnoreSec: 1.5,            // Glances shorter than 1.5s completely ignored (mirror checks)
-    headYawNoticeSec: 3.0,           // Head turned > 25° for >= 3.0s -> NOTICE
-    headYawWarningSec: 6.0,          // Head turned > 25° for >= 6.0s -> WARNING
+    headYawSmoothingFrames: 4,       // Fast moving average smoothing
+    headYawOffRoadDeg: 22.0,         // Head turned > 22° from calibrated forward
+    glanceIgnoreSec: 0.8,            // Glances shorter than 0.8s ignored (mirror checks)
+    headYawNoticeSec: 1.5,           // Head turned > 22° for >= 1.5s -> NOTICE
+    headYawWarningSec: 3.0,          // Head turned > 22° for >= 3.0s -> WARNING (voice + chime)
 
     // 5. Yawn Detection Rules
     marYawnThreshold: 0.60,          // MAR above this indicates mouth open
@@ -67,7 +67,8 @@ export const CONFIG = {
   voice: {
     // 2. Short, natural sentences with no colons, symbols, or numbers
     noticeSpokenText: '',                                            // NOTICE: silent
-    warningSpokenText: 'You seem drowsy. Please take a break soon.', // WARNING
+    warningSpokenText: 'You seem drowsy. Please take a break soon.', // WARNING (drowsy)
+    distractionSpokenText: 'Please keep your eyes on the road.',     // WARNING (distraction)
     criticalSpokenText: 'Pull over safely.',                         // CRITICAL
     speechRate: 0.95,
     speechChimeDelayMs: 500,         // Play chime first, speak after ~0.5s
