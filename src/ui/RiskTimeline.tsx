@@ -85,7 +85,7 @@ export const RiskTimeline: React.FC = () => {
                 fontSize: '11px',
                 color: '#f8fafc',
               }}
-              formatter={(val: number) => [`${val}%`, '']}
+              formatter={(val) => [`${val ?? 0}%`, '']}
             />
             <Legend
               verticalAlign="top"
