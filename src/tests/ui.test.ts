@@ -192,4 +192,20 @@ describe('Tiered Alert Dispatcher (M4)', () => {
     await alertDispatcher.dispatch(RISK_LEVELS.WARNING, { voiceEnabled: true });
     expect(spy).toHaveBeenCalledTimes(1); // not called again within repeat interval
   });
+
+  it('dispatches WARNING alert with custom distraction voice text when provided', async () => {
+    alertDispatcher.resetCooldown();
+    const spy = vi.spyOn(alertAudioPlayer, 'playAlert').mockResolvedValue();
+    await alertDispatcher.dispatch(RISK_LEVELS.WARNING, {
+      voiceEnabled: true,
+      customMessage: CONFIG.voice.distractionSpokenText,
+    });
+    expect(spy).toHaveBeenCalledWith(
+      RISK_LEVELS.WARNING,
+      expect.objectContaining({
+        spokenText: 'Please keep your eyes on the road.',
+        enableVoice: true,
+      })
+    );
+  });
 });

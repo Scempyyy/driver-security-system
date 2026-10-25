@@ -152,19 +152,34 @@ export const App: React.FC = () => {
         }
       }
 
+      // Reset alertDispatcher when returning to NORMAL so alarms stop and cooldowns reset cleanly
+      if (evaluation.assessment.level === RISK_LEVELS.NORMAL) {
+        alertDispatcher.dispatch(RISK_LEVELS.NORMAL);
+      }
+
       // 4. Dispatch alert if engine fired one
       if (evaluation.alert) {
         addAlert(evaluation.alert);
         const currentStore = useNeuroDriveStore.getState();
 
-        // Check if primary factor is attention drift / off road
-        const isOffRoadAlert = evaluation.assessment.factors.some(
-          (f) => f.id === 'attention_drift' && f.contribution >= 0.20
+        // Check whether the alert is primarily due to distraction / eyes off road
+        const isHeadTurnedAway = features.eyesOffRoadSec >= CONFIG.driver.headYawNoticeSec;
+        const hasOffRoadFactor = evaluation.assessment.factors.some(
+          (f) => f.id === 'attention_drift' || f.id === 'eyes_off_road'
         );
-        const customMessage =
-          evaluation.alert.level === RISK_LEVELS.WARNING && isOffRoadAlert
-            ? CONFIG.voice.distractionSpokenText
-            : undefined;
+        const isOffRoadAlert =
+          features.eyesOffRoadSec >= CONFIG.driver.headYawWarningSec ||
+          (isHeadTurnedAway && features.longClosureSec < CONFIG.driver.longClosureNoticeSec) ||
+          (hasOffRoadFactor && features.longClosureSec < CONFIG.driver.longClosureNoticeSec);
+
+        let customMessage: string | undefined = undefined;
+        if (evaluation.alert.level === RISK_LEVELS.WARNING) {
+          if (isOffRoadAlert) {
+            customMessage = CONFIG.voice.distractionSpokenText; // "Please keep your eyes on the road."
+          } else {
+            customMessage = CONFIG.voice.warningSpokenText; // "You seem drowsy. Please take a break soon."
+          }
+        }
 
         alertDispatcher.dispatch(evaluation.alert.level, {
           volumeSettings: currentStore.volumeSettings,
@@ -393,38 +408,39 @@ export const App: React.FC = () => {
           ear: 0.28,
           longClosureSec: 0.0,
           headYaw: 32.0,
-          eyesOffRoadSec: 2.5,
+          eyesOffRoadSec: 3.2,
           yawning: false,
         });
         const assessment = {
           t: now,
-          driverRisk: 0.42,
+          driverRisk: 0.65,
           vehicleRisk: 0.02,
-          fusedRisk: 0.38,
-          level: RISK_LEVELS.NOTICE,
+          fusedRisk: 0.65,
+          level: RISK_LEVELS.WARNING,
           confidence: 0.92,
           factors: [
             {
-              id: 'eyes_off_road',
-              label: 'Attention Drift / Head Turned',
-              contribution: 0.80,
-              evidence: 'Head yaw 32.0° away for 2.5 s (threshold 2.0 s)',
+              id: 'attention_drift',
+              label: 'Eyes Off Road (Head Turned)',
+              contribution: 0.70,
+              evidence: 'Head yaw 32.0° away for 3.2 s (threshold 3.0 s)',
             },
           ],
-          explanation: 'Driver head turned 32.0° away from forward roadway for 2.5s.',
+          explanation: 'Driver head turned 32.0° away from forward roadway for 3.2s.',
           compoundEscalation: false,
         };
         setRiskAssessment(assessment);
         addAlert({
           id: `alert_${now}`,
           t: now,
-          level: RISK_LEVELS.NOTICE,
+          level: RISK_LEVELS.WARNING,
           assessment,
           acknowledged: false,
         });
-        alertDispatcher.dispatch(RISK_LEVELS.NOTICE, {
+        alertDispatcher.dispatch(RISK_LEVELS.WARNING, {
           muted: audioMuted,
           voiceEnabled,
+          customMessage: CONFIG.voice.distractionSpokenText,
         });
         break;
       }

@@ -271,5 +271,40 @@ describe('Driver Vision Module - Formulas, Timing & Features', () => {
       expect(f2.yawning).toBe(true);
       expect(f2.eyesOffRoadSec).toBeCloseTo(1.6, 1); // yaw > 25 deg counts as off road
     });
+
+    it('prevents false eye closure when head is turned (>15 deg) with one eye clearly open', () => {
+      const lms = createMockLandmarks(478);
+      // Turn head right by 28 degrees
+      const matrix = createPoseMatrix(0, 28, 0);
+
+      // Left eye is angled/foreshortened (closed-like geometry, EAR ~0.10)
+      lms[362] = { x: 10, y: 20, z: 0 };
+      lms[263] = { x: 30, y: 20, z: 0 };
+      lms[385] = { x: 15, y: 19, z: 0 };
+      lms[380] = { x: 15, y: 21, z: 0 };
+      lms[387] = { x: 25, y: 19, z: 0 };
+      lms[373] = { x: 25, y: 21, z: 0 };
+
+      // Right eye is facing camera and wide open (EAR ~0.30)
+      lms[33] = { x: 40, y: 20, z: 0 };
+      lms[133] = { x: 60, y: 20, z: 0 };
+      lms[160] = { x: 45, y: 17, z: 0 };
+      lms[144] = { x: 45, y: 23, z: 0 };
+      lms[158] = { x: 55, y: 17, z: 0 };
+      lms[153] = { x: 55, y: 23, z: 0 };
+
+      let t = 1000;
+      const f1 = extractor.extract({ landmarks: lms, matrix, timestampMs: t }, t);
+      expect(f1.headYaw).toBeCloseTo(28, 1);
+      expect(f1.longClosureSec).toBe(0.0);
+
+      // 2 seconds later of looking to the side
+      t += 2000;
+      const f2 = extractor.extract({ landmarks: lms, matrix, timestampMs: t }, t);
+      // longClosureSec must remain 0 because the right eye is clearly open!
+      expect(f2.longClosureSec).toBe(0.0);
+      // But eyesOffRoadSec should have accumulated 2.0s!
+      expect(f2.eyesOffRoadSec).toBeCloseTo(2.0, 1);
+    });
   });
 });

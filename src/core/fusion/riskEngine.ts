@@ -203,10 +203,15 @@ export function evaluateRisk(
   }
 
   if (driverFeatures.eyesOffRoadSec >= CONFIG.driver.headYawNoticeSec) {
+    const isWarning = driverFeatures.eyesOffRoadSec >= CONFIG.driver.headYawWarningSec;
+    const factorContribution = isWarning
+      ? Math.max(0.65, attentionRisk)
+      : Math.max(0.35, attentionRisk);
+
     factors.push({
       id: 'attention_drift',
       label: 'Eyes Off Road (Head Turned)',
-      contribution: attentionRisk * CONFIG.fusion.driverWeights.attentionDrift,
+      contribution: factorContribution,
       evidence: `Head turned off road ${driverFeatures.eyesOffRoadSec.toFixed(1)} s`,
     });
   }

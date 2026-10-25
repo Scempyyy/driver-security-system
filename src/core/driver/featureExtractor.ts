@@ -106,71 +106,7 @@ export class FeatureExtractor {
 
     const landmarks = data.landmarks;
 
-    // 1. EAR Calculation & Smoothing over frames
-    const { ear: rawEar } = calculateEAR(landmarks);
-    this.earBuffer.push(rawEar);
-    if (this.earBuffer.length > CONFIG.driver.earSmoothingFrames) {
-      this.earBuffer.shift();
-    }
-    const ear = this.earBuffer.reduce((a, b) => a + b, 0) / this.earBuffer.length;
-
-    const earThreshold = this.baseline.earThreshold ?? CONFIG.driver.earFallbackThreshold;
-    // Eyes are closed when smoothed EAR is below threshold AND raw instantaneous EAR is not distinctly open
-    const isClosed = ear < earThreshold && rawEar < earThreshold;
-
-    // Continuous eye closure duration (ordinary blinks under 0.5s are ignored completely)
-    if (isClosed) {
-      if (this.closureStartMs === null) {
-        this.closureStartMs = t;
-      }
-    } else {
-      this.closureStartMs = null;
-      // If eyes have clearly reopened, reset earBuffer to instant rawEar to prevent lag
-      if (rawEar >= earThreshold) {
-        this.earBuffer = [rawEar];
-      }
-    }
-    const longClosureSec = this.closureStartMs !== null ? Math.max(0, (t - this.closureStartMs) / 1000) : 0;
-
-    // 2. PERCLOS & Blink Rate (with slow blink tracking)
-    const perclos60 = this.perclosTracker.addSample(t, isClosed);
-    const blinkRate = this.blinkTracker.update(t, isClosed);
-    const slowBlinks60s = this.blinkTracker.getSlowBlinkCount(t);
-
-    // 3. MAR & Yawn Detection (continuous >= 1.5s)
-    const mar = calculateMAR(landmarks);
-    const isMouthOpen = mar >= CONFIG.driver.marYawnThreshold;
-
-    let yawning = false;
-    if (isMouthOpen) {
-      if (this.yawnStartMs === null) {
-        this.yawnStartMs = t;
-      }
-      const yawnDurationSec = (t - this.yawnStartMs) / 1000;
-      yawning = yawnDurationSec >= CONFIG.driver.yawnMinDurationSec;
-    } else {
-      if (this.yawnStartMs !== null) {
-        const completedDuration = (t - this.yawnStartMs) / 1000;
-        if (completedDuration >= CONFIG.driver.yawnMinDurationSec) {
-          this.yawnTimestamps.push(t);
-        }
-      }
-      this.yawnStartMs = null;
-      yawning = false;
-    }
-
-    // Prune yawn timestamps within active window
-    const yawnWindowSec =
-      this.baseline.mode === 'demo_15s'
-        ? CONFIG.driver.yawnWindowDemoSec
-        : CONFIG.driver.yawnWindowFullSec;
-    const yawnCutoff = t - yawnWindowSec * 1000;
-    while (this.yawnTimestamps.length > 0 && this.yawnTimestamps[0] < yawnCutoff) {
-      this.yawnTimestamps.shift();
-    }
-    const recentYawnCount = this.yawnTimestamps.length;
-
-    // 4. Head Pose Extraction & Smoothing
+    // 1. Head Pose Extraction & Smoothing (computed first for angle-aware eye processing)
     let headPose: HeadPose = { pitch: 0, yaw: 0, roll: 0 };
     let hasMatrixPose = false;
     if (data.matrix) {
@@ -204,20 +140,89 @@ export class FeatureExtractor {
     const adjustedYaw = smoothedYaw - (this.baseline.headYawOffset || 0);
     const adjustedRoll = headPose.roll;
 
-    // 5. Eyes Off Road: HEAD YAW ONLY!
+    // 2. Eyes Off Road: HEAD YAW ONLY!
     // Ignore iris/eye direction for this alert (glances < 1.5s ignored for mirror checks)
     const isYawOff = Math.abs(adjustedYaw) > CONFIG.driver.headYawOffRoadDeg;
+    let eyesOffRoadSec = 0.0;
     if (isYawOff) {
       if (this.eyesOffRoadStartMs === null) {
         this.eyesOffRoadStartMs = t;
       }
       const rawAwaySec = (t - this.eyesOffRoadStartMs) / 1000;
       // Mirror checks (< 1.5s) are ignored
-      var eyesOffRoadSec = rawAwaySec >= CONFIG.driver.glanceIgnoreSec ? rawAwaySec : 0.0;
+      eyesOffRoadSec = rawAwaySec >= CONFIG.driver.glanceIgnoreSec ? rawAwaySec : 0.0;
     } else {
       this.eyesOffRoadStartMs = null;
-      var eyesOffRoadSec = 0.0;
+      eyesOffRoadSec = 0.0;
     }
+
+    // 3. EAR Calculation & Smoothing over frames (perspective-aware)
+    const { ear: rawEar, leftEar, rightEar } = calculateEAR(landmarks);
+    this.earBuffer.push(rawEar);
+    if (this.earBuffer.length > CONFIG.driver.earSmoothingFrames) {
+      this.earBuffer.shift();
+    }
+    const ear = this.earBuffer.reduce((a, b) => a + b, 0) / this.earBuffer.length;
+
+    const earThreshold = this.baseline.earThreshold ?? CONFIG.driver.earFallbackThreshold;
+    // When head is turned significantly, one eye is foreshortened by perspective.
+    // If either eye is clearly open (>= earThreshold), the eyes are NOT closed.
+    const effectiveEar = Math.abs(adjustedYaw) > 15.0 ? Math.max(ear, Math.max(leftEar, rightEar)) : ear;
+    const effectiveRawEar = Math.abs(adjustedYaw) > 15.0 ? Math.max(rawEar, Math.max(leftEar, rightEar)) : rawEar;
+    // Eyes are closed when smoothed EAR is below threshold AND raw instantaneous EAR is not distinctly open
+    const isClosed = effectiveEar < earThreshold && effectiveRawEar < earThreshold;
+
+    // Continuous eye closure duration (ordinary blinks under 0.5s are ignored completely)
+    if (isClosed) {
+      if (this.closureStartMs === null) {
+        this.closureStartMs = t;
+      }
+    } else {
+      this.closureStartMs = null;
+      // If eyes have clearly reopened, reset earBuffer to instant rawEar to prevent lag
+      if (effectiveRawEar >= earThreshold) {
+        this.earBuffer = [rawEar];
+      }
+    }
+    const longClosureSec = this.closureStartMs !== null ? Math.max(0, (t - this.closureStartMs) / 1000) : 0;
+
+    // 4. PERCLOS & Blink Rate (with slow blink tracking)
+    const perclos60 = this.perclosTracker.addSample(t, isClosed);
+    const blinkRate = this.blinkTracker.update(t, isClosed);
+    const slowBlinks60s = this.blinkTracker.getSlowBlinkCount(t);
+
+    // 5. MAR & Yawn Detection (continuous >= 1.5s)
+    const mar = calculateMAR(landmarks);
+    const isMouthOpen = mar >= CONFIG.driver.marYawnThreshold;
+
+    let yawning = false;
+    if (isMouthOpen) {
+      if (this.yawnStartMs === null) {
+        this.yawnStartMs = t;
+      }
+      const yawnDurationSec = (t - this.yawnStartMs) / 1000;
+      yawning = yawnDurationSec >= CONFIG.driver.yawnMinDurationSec;
+    } else {
+      if (this.yawnStartMs !== null) {
+        const completedDuration = (t - this.yawnStartMs) / 1000;
+        if (completedDuration >= CONFIG.driver.yawnMinDurationSec) {
+          this.yawnTimestamps.push(t);
+        }
+      }
+      this.yawnStartMs = null;
+      yawning = false;
+    }
+
+    // Prune yawn timestamps within active window
+    const yawnWindowSec =
+      this.baseline.mode === 'demo_15s'
+        ? CONFIG.driver.yawnWindowDemoSec
+        : CONFIG.driver.yawnWindowFullSec;
+    const yawnCutoff = t - yawnWindowSec * 1000;
+    while (this.yawnTimestamps.length > 0 && this.yawnTimestamps[0] < yawnCutoff) {
+      this.yawnTimestamps.shift();
+    }
+    const recentYawnCount = this.yawnTimestamps.length;
 
     // 6. Face Quality heuristic
     let quality = 0.95;
