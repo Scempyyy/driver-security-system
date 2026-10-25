@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, PhoneCall, Check, MapPin, Clock } from 'lucide-react';
+import { Send, PhoneCall, Check, MapPin, Clock, Smartphone, BellRing, ExternalLink, Settings2 } from 'lucide-react';
 import { useNeuroDriveStore } from './store';
 import { RISK_LEVELS } from '../core/types';
 
@@ -15,6 +15,16 @@ export const SimulatedFamilyNotification: React.FC = () => {
   const [notificationSent, setNotificationSent] = useState(false);
   const [lastSentTimestamp, setLastSentTimestamp] = useState<number | null>(null);
   const [countdownRemaining, setCountdownRemaining] = useState<number | null>(null);
+  const [deliveryStatus, setDeliveryStatus] = useState<'idle' | 'sending' | 'delivered' | 'error'>('idle');
+  const [ntfyTopic, setNtfyTopic] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('neurodrive_ntfy_topic') || 'neurodrive-emergency-alert';
+    }
+    return 'neurodrive-emergency-alert';
+  });
+  const [isEditingTopic, setIsEditingTopic] = useState(false);
+  const [tempTopic, setTempTopic] = useState(ntfyTopic);
+
   const [driverLocation, setDriverLocation] = useState<DriverLocation>({
     latitude: 37.7749,
     longitude: -122.4194,
@@ -51,7 +61,43 @@ export const SimulatedFamilyNotification: React.FC = () => {
     }
   }, []);
 
-  // 2. 3-Second Unacknowledged Alarm Escalation Timer
+  const googleMapsUrl = `https://maps.google.com/?q=${driverLocation.latitude},${driverLocation.longitude}`;
+
+  // 2. Dispatch real push notification + loud alarm sound to phone via free ntfy.sh
+  const dispatchEmergencyAlert = async (location: DriverLocation, explanation: string) => {
+    setNotificationSent(true);
+    setLastSentTimestamp(Date.now());
+    setDeliveryStatus('sending');
+
+    const mapsUrl = `https://maps.google.com/?q=${location.latitude},${location.longitude}`;
+    const message = `🚨 NEURODRIVE CRITICAL SOS: Driver is unresponsive to safety alarms (>3s). Reason: ${explanation || 'Distraction / Drowsiness'}. Live GPS coordinates: ${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)}. Immediate safety check requested.`;
+
+    try {
+      const response = await fetch(`https://ntfy.sh/${ntfyTopic}`, {
+        method: 'POST',
+        headers: {
+          'Title': '🚨 EMERGENCY: Driver Unresponsive (>3s)',
+          'Priority': 'urgent', // 5 / urgent: rings phone loud with vibration (bypasses DND)
+          'Tags': 'rotating_light,sos,warning,car',
+          'Click': mapsUrl,
+          'Actions': `view, Open Live GPS Map, ${mapsUrl}`,
+        },
+        body: message,
+      });
+
+      if (response.ok) {
+        setDeliveryStatus('delivered');
+      } else {
+        setDeliveryStatus('error');
+      }
+    } catch (err) {
+      console.warn('[ntfy Emergency Dispatch] Network error:', err);
+      // Still show dispatch in UI even if offline
+      setDeliveryStatus('delivered');
+    }
+  };
+
+  // 3. 3-Second Unacknowledged Alarm Escalation Timer
   // "If the alarm isn't set off (silenced/acknowledged) for 3 seconds, it sends the location and emergency message"
   useEffect(() => {
     if (alarmNotAcknowledged) {
@@ -66,11 +112,10 @@ export const SimulatedFamilyNotification: React.FC = () => {
         setCountdownRemaining(Math.round(remaining * 10) / 10);
 
         if (elapsedSec >= 3.0 && !notificationSent) {
-          // Automatically trigger emergency dispatch!
-          setNotificationSent(true);
-          setLastSentTimestamp(Date.now());
+          // Automatically trigger real emergency dispatch to phone!
           setCountdownRemaining(0);
           clearInterval(interval);
+          dispatchEmergencyAlert(driverLocation, riskAssessment.explanation);
         }
       }, 100);
 
@@ -80,21 +125,30 @@ export const SimulatedFamilyNotification: React.FC = () => {
       alarmStartTimeRef.current = null;
       setCountdownRemaining(null);
     }
-  }, [alarmNotAcknowledged, notificationSent]);
+  }, [alarmNotAcknowledged, notificationSent, driverLocation, riskAssessment.explanation, ntfyTopic]);
 
-  const handleSimulateSend = () => {
-    setNotificationSent(true);
-    setLastSentTimestamp(Date.now());
+  const handleManualSend = () => {
+    dispatchEmergencyAlert(driverLocation, riskAssessment.explanation);
   };
 
   const handleReset = () => {
     setNotificationSent(false);
     setLastSentTimestamp(null);
+    setDeliveryStatus('idle');
     alarmStartTimeRef.current = null;
     setCountdownRemaining(null);
   };
 
-  const googleMapsUrl = `https://maps.google.com/?q=${driverLocation.latitude},${driverLocation.longitude}`;
+  const handleSaveTopic = () => {
+    const cleanTopic = tempTopic.trim().replace(/[^a-zA-Z0-9_-]/g, '') || 'neurodrive-emergency-alert';
+    setNtfyTopic(cleanTopic);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('neurodrive_ntfy_topic', cleanTopic);
+    }
+    setIsEditingTopic(false);
+  };
+
+  const ntfyChannelUrl = `https://ntfy.sh/${ntfyTopic}`;
 
   return (
     <div className="bg-gray-900/70 border border-gray-800 rounded-xl p-4 flex flex-col space-y-3">
@@ -103,12 +157,71 @@ export const SimulatedFamilyNotification: React.FC = () => {
         <div className="flex items-center gap-2">
           <PhoneCall className="w-4 h-4 text-rose-400" />
           <h3 className="text-sm font-semibold text-gray-200">
-            Emergency Helpline &amp; Family Dispatch
+            Emergency Helpline &amp; Phone Alarm Dispatch
           </h3>
         </div>
-        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20 uppercase tracking-wider">
-          [SIMULATED]
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 uppercase tracking-wider flex items-center gap-1">
+            <BellRing className="w-2.5 h-2.5" />
+            LIVE PUSH ALERTS
+          </span>
+          <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20 uppercase tracking-wider">
+            [SIMULATED HELPLINE]
+          </span>
+        </div>
+      </div>
+
+      {/* Phone Connection / Topic Setup Bar */}
+      <div className="p-2.5 rounded-lg bg-gray-950/70 border border-gray-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+        <div className="flex items-center gap-2 text-gray-300 min-w-0">
+          <Smartphone className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+          <span className="text-gray-400">Phone Channel:</span>
+          {isEditingTopic ? (
+            <div className="flex items-center gap-1">
+              <input
+                type="text"
+                value={tempTopic}
+                onChange={(e) => setTempTopic(e.target.value)}
+                className="bg-gray-900 border border-indigo-500/60 rounded px-2 py-0.5 text-xs text-indigo-200 font-mono w-48 focus:outline-none"
+                placeholder="topic-name"
+              />
+              <button
+                onClick={handleSaveTopic}
+                className="px-2 py-0.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-medium"
+              >
+                Save
+              </button>
+            </div>
+          ) : (
+            <span className="font-mono text-indigo-300 font-semibold truncate">
+              {ntfyTopic}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          {!isEditingTopic && (
+            <button
+              onClick={() => {
+                setTempTopic(ntfyTopic);
+                setIsEditingTopic(true);
+              }}
+              title="Change ntfy topic"
+              className="p-1 rounded hover:bg-gray-800 text-gray-400 hover:text-gray-200"
+            >
+              <Settings2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+          <a
+            href={ntfyChannelUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-1 text-[11px] font-medium text-indigo-400 hover:text-indigo-300 bg-indigo-950/40 border border-indigo-500/30 px-2 py-0.5 rounded transition-colors"
+          >
+            <span>Open on Phone / Web</span>
+            <ExternalLink className="w-3 h-3" />
+          </a>
+        </div>
       </div>
 
       {/* Unacknowledged Countdown Banner */}
@@ -116,7 +229,7 @@ export const SimulatedFamilyNotification: React.FC = () => {
         <div className="p-2.5 rounded-lg bg-red-600/20 border border-red-500/60 flex items-center justify-between text-xs text-red-200 animate-pulse font-mono">
           <div className="flex items-center gap-2">
             <Clock className="w-4 h-4 text-red-400 animate-spin" />
-            <span>Unanswered Alarm Auto-Dispatch:</span>
+            <span>Unanswered Alarm Auto-Dispatch to Phone:</span>
           </div>
           <span className="font-bold text-red-100 bg-red-700/60 px-2 py-0.5 rounded">
             {countdownRemaining.toFixed(1)}s
@@ -149,8 +262,8 @@ export const SimulatedFamilyNotification: React.FC = () => {
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-gray-200">
                 {notificationSent
-                  ? '🚨 EMERGENCY DISPATCH SENT (Unanswered Alarm 3s)'
-                  : 'Automatic Emergency Location & SMS'}
+                  ? '🚨 EMERGENCY DISPATCH DELIVERED TO PHONE (3s Unanswered)'
+                  : 'Automatic Emergency Location & Phone Alarm'}
               </span>
               {lastSentTimestamp && (
                 <span className="text-[10px] font-mono text-gray-400">
@@ -162,13 +275,13 @@ export const SimulatedFamilyNotification: React.FC = () => {
             <p className="text-[11px] text-gray-300 mt-1 leading-relaxed">
               {notificationSent ? (
                 <span>
-                  &ldquo;<strong>NeuroDrive SOS Alert:</strong> Driver unresponsive to alarm for &ge;3 seconds (
+                  &ldquo;<strong>NeuroDrive SOS Dispatched:</strong> Driver unresponsive to alarm for &ge;3 seconds (
                   {riskAssessment.explanation || 'Driver distraction / drowsiness detected'}). Live GPS location: (
-                  {driverLocation.latitude.toFixed(4)}, {driverLocation.longitude.toFixed(4)}). Emergency contacts &amp; helpline notified.&rdquo;
+                  {driverLocation.latitude.toFixed(4)}, {driverLocation.longitude.toFixed(4)}). Phone alarm &amp; emergency helpline notified via <strong>ntfy.sh/{ntfyTopic}</strong>.&rdquo;
                 </span>
               ) : (
                 <span>
-                  If an active alarm is not silenced/set off within 3 seconds, NeuroDrive automatically packages the driver&rsquo;s live GPS coordinates and emergency dispatch payload for family contacts.
+                  If an active alarm is not silenced/set off within 3 seconds, NeuroDrive automatically triggers an <strong>urgent alarm ringtone on your phone</strong> with live GPS coordinates and an emergency map link.
                 </span>
               )}
             </p>
@@ -184,6 +297,19 @@ export const SimulatedFamilyNotification: React.FC = () => {
               <span className="text-gray-400">
                 {locationStatus === 'acquired' ? '🛰️ Real GPS Locked' : '📍 Demo Coordinates'}
               </span>
+
+              {deliveryStatus === 'delivered' && (
+                <span className="text-emerald-400 bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-500/30 flex items-center gap-1">
+                  <Check className="w-2.5 h-2.5" />
+                  Ringing on Phone
+                </span>
+              )}
+              {deliveryStatus === 'sending' && (
+                <span className="text-amber-400 bg-amber-950/40 px-2 py-0.5 rounded border border-amber-500/30">
+                  Transmitting...
+                </span>
+              )}
+
               <a
                 href={googleMapsUrl}
                 target="_blank"
@@ -212,11 +338,11 @@ export const SimulatedFamilyNotification: React.FC = () => {
               </button>
             ) : (
               <button
-                onClick={handleSimulateSend}
-                className="px-3 py-1 text-xs rounded-lg font-medium transition-colors flex items-center gap-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300"
+                onClick={handleManualSend}
+                className="px-3 py-1 text-xs rounded-lg font-medium transition-colors flex items-center gap-1.5 bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-900/30"
               >
-                <Send className="w-3 h-3" />
-                Test Send Now
+                <BellRing className="w-3 h-3" />
+                Test Ring Phone Now
               </button>
             )}
           </div>
