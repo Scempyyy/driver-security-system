@@ -28,12 +28,16 @@ export const DriverGauges: React.FC = () => {
         </h3>
         <span
           className={`text-[11px] font-mono px-2 py-0.5 rounded-full border ${
-            driverFeatures.quality >= CONFIG.driver.minQualityConfidence
+            !driverFeatures.faceDetected
+              ? 'bg-red-500/10 text-red-400 border-red-500/20'
+              : driverFeatures.quality >= CONFIG.driver.minQualityConfidence
               ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
               : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
           }`}
         >
-          Quality: {Math.round(driverFeatures.quality * 100)}%
+          {!driverFeatures.faceDetected
+            ? 'No Face Detected'
+            : `Tracking Quality: ${Math.round(driverFeatures.quality * 100)}%`}
         </span>
       </div>
 

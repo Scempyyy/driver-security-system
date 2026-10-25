@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Cpu,
   Volume2,
@@ -6,10 +6,17 @@ import {
   Mic,
   RotateCcw,
   Sparkles,
+  Camera,
 } from 'lucide-react';
 import { useNeuroDriveStore } from './ui/store';
 import { RISK_LEVELS } from './core/types';
 import { alertDispatcher } from './io/speech/alertDispatcher';
+import { CameraManager, CameraStatus } from './io/camera/cameraManager';
+import { FeatureExtractor } from './core/driver/featureExtractor';
+import { evaluateRisk, createInitialRiskState, RiskEngineState } from './core/fusion/riskEngine';
+import { VehicleManager } from './core/vehicle/vehicleManager';
+import { renderFaceMesh } from './ui/meshRenderer';
+import { FaceLandmarkerResult } from '@mediapipe/tasks-vision';
 
 import { LivePanel } from './ui/LivePanel';
 import { DriverGauges } from './ui/DriverGauges';
@@ -27,22 +34,206 @@ export const App: React.FC = () => {
     setAudioMuted,
     voiceEnabled,
     setVoiceEnabled,
+    activeBaseline,
     addAlert,
     setRiskAssessment,
     updateDriverFeatures,
+    updateVehicleFeatures,
     setSimulatorPreset,
   } = useNeuroDriveStore();
 
   const [isCalibrationOpen, setIsCalibrationOpen] = useState(false);
-  const [activeDelegate] = useState<'GPU' | 'CPU'>('GPU');
-  const [fps] = useState<number>(30);
+  const [activeDelegate, setActiveDelegate] = useState<'GPU' | 'CPU'>('GPU');
+  const [fps, setFps] = useState<number>(0);
+  const [cameraStatus, setCameraStatus] = useState<CameraStatus>('idle');
+  const [cameraError, setCameraError] = useState<string>('');
+  const [hideVideo, setHideVideo] = useState<boolean>(false);
 
-  // Trigger alert dispatcher whenever risk level shifts upwards or creates an alert
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  const cameraManagerRef = useRef<CameraManager | null>(null);
+  const featureExtractorRef = useRef<FeatureExtractor>(new FeatureExtractor(activeBaseline));
+  const vehicleManagerRef = useRef<VehicleManager | null>(null);
+  const riskEngineStateRef = useRef<RiskEngineState>(createInitialRiskState(Date.now()));
+
+  // Keep feature extractor updated with calibrated baseline
+  useEffect(() => {
+    featureExtractorRef.current.updateBaseline(activeBaseline);
+  }, [activeBaseline]);
+
+  // Initialize and run VehicleManager for continuous vehicle signals
+  useEffect(() => {
+    const vehicleMgr = new VehicleManager({
+      initialSource: 'simulated',
+      initialPreset: 'NORMAL',
+      baseline: activeBaseline,
+    });
+    vehicleManagerRef.current = vehicleMgr;
+
+    vehicleMgr.subscribe((features) => {
+      updateVehicleFeatures(features);
+    });
+
+    vehicleMgr.start(100); // 10 Hz telemetry loop
+
+    return () => {
+      vehicleMgr.stop();
+    };
+  }, [updateVehicleFeatures, activeBaseline]);
+
+  // Handle incoming face landmarker frames from live webcam
+  const handleFrameResult = useCallback(
+    (result: FaceLandmarkerResult, timestampMs: number) => {
+      const landmarks = result.faceLandmarks?.[0];
+      const matrix = result.facialTransformationMatrixes?.[0];
+
+      // 1. Extract live DriverFeatures strictly from real MediaPipe detections
+      const features = featureExtractorRef.current.extract(
+        {
+          landmarks,
+          matrix,
+          timestampMs,
+        },
+        timestampMs
+      );
+
+      // Update store with live measured features
+      updateDriverFeatures(features);
+
+      // 2. Render live face mesh onto canvas overlay
+      if (canvasRef.current) {
+        const canvas = canvasRef.current;
+        const video = videoRef.current;
+        if (video && video.videoWidth > 0) {
+          if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+          }
+        } else if (canvas.width !== 640) {
+          canvas.width = 640;
+          canvas.height = 480;
+        }
+
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          const earThreshold = activeBaseline.earThreshold;
+          renderFaceMesh(ctx, landmarks, canvas.width, canvas.height, {
+            isEyeClosed: features.faceDetected && features.ear < earThreshold,
+            isYawning: features.yawning,
+            isOffRoad: features.eyesOffRoadSec >= 2.0,
+            hideVideo,
+            headYawDeg: features.headYaw,
+            headPitchDeg: features.headPitch,
+          });
+        }
+      }
+
+      // 3. Evaluate live risk through pure rule-based fusion engine
+      const currentVehicle = useNeuroDriveStore.getState().vehicleFeatures;
+      const evaluation = evaluateRisk(
+        features,
+        currentVehicle,
+        activeBaseline,
+        riskEngineStateRef.current
+      );
+
+      riskEngineStateRef.current = evaluation.state;
+      setRiskAssessment(evaluation.assessment);
+
+      // 4. Dispatch alert if engine fired one
+      if (evaluation.alert) {
+        addAlert(evaluation.alert);
+        alertDispatcher.dispatch(evaluation.alert.level, {
+          muted: useNeuroDriveStore.getState().audioMuted,
+          voiceEnabled: useNeuroDriveStore.getState().voiceEnabled,
+        });
+      }
+    },
+    [activeBaseline, hideVideo, updateDriverFeatures, setRiskAssessment, addAlert]
+  );
+
+  // Start live webcam stream and FaceLandmarker
+  const startCamera = useCallback(async () => {
+    try {
+      setCameraError('');
+      if (!cameraManagerRef.current) {
+        cameraManagerRef.current = new CameraManager({
+          width: 640,
+          height: 480,
+          onFrameResult: (res, t) => handleFrameResult(res, t),
+          onFpsUpdate: (liveFps) => setFps(liveFps),
+          onDelegateReady: (del) => setActiveDelegate(del),
+          onStatusChange: (status, msg) => {
+            setCameraStatus(status);
+            if (msg) setCameraError(msg);
+          },
+          onError: (err, status) => {
+            console.error('[CameraManager Error]', err);
+            setCameraStatus(status);
+            setCameraError(err.message);
+          },
+        });
+      }
+
+      const videoEl = videoRef.current;
+      if (videoEl) {
+        await cameraManagerRef.current.start(videoEl);
+      }
+    } catch (err: unknown) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      console.warn('[App] Camera startup halted:', error.message);
+    }
+  }, [handleFrameResult]);
+
+  // Stop camera stream
+  const stopCamera = useCallback(() => {
+    if (cameraManagerRef.current) {
+      cameraManagerRef.current.stop();
+    }
+    setCameraStatus('idle');
+    setFps(0);
+
+    // Clear canvas
+    if (canvasRef.current) {
+      const ctx = canvasRef.current.getContext('2d');
+      if (ctx) ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+    }
+
+    // Reset driver features to safe zeroed state (no fake numbers)
+    updateDriverFeatures({
+      faceDetected: false,
+      quality: 0.0,
+      ear: 0.0,
+      perclos60: 0.0,
+      blinkRate: 0,
+      longClosureSec: 0,
+      mar: 0.0,
+      yawning: false,
+      headPitch: 0.0,
+      headYaw: 0.0,
+      headRoll: 0.0,
+      eyesOffRoadSec: 0.0,
+    });
+  }, [updateDriverFeatures]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (cameraManagerRef.current) {
+        cameraManagerRef.current.dispose();
+      }
+    };
+  }, []);
+
+  // Quick Demo Scenario Trigger (for reliable demo fallback/presentation)
   const triggerSimulatedScenario = (scenario: 'normal' | 'drowsy' | 'compound' | 'distracted') => {
     const now = Date.now();
     switch (scenario) {
       case 'drowsy': {
         updateDriverFeatures({
+          faceDetected: true,
+          quality: 0.95,
           ear: 0.17,
           longClosureSec: 2.1,
           perclos60: 0.28,
@@ -71,7 +262,7 @@ export const App: React.FC = () => {
             },
           ],
           explanation:
-            'Driver eye closure exceeded 2.1s with 28% PERCLOS accumulation. Audible chime and verbal alert activated.',
+            'Driver eye closure exceeded 2.1s with 28% PERCLOS accumulation. Spoken warning and audible alert active.',
           compoundEscalation: false,
         };
         setRiskAssessment(assessment);
@@ -91,6 +282,8 @@ export const App: React.FC = () => {
       case 'compound': {
         setSimulatorPreset('BRAKE_JUDDER');
         updateDriverFeatures({
+          faceDetected: true,
+          quality: 0.96,
           ear: 0.15,
           longClosureSec: 2.4,
           perclos60: 0.32,
@@ -144,27 +337,30 @@ export const App: React.FC = () => {
       }
       case 'distracted': {
         updateDriverFeatures({
+          faceDetected: true,
+          quality: 0.92,
           ear: 0.28,
           longClosureSec: 0.0,
           headYaw: 32.0,
           eyesOffRoadSec: 2.5,
+          yawning: false,
         });
         const assessment = {
           t: now,
-          driverRisk: 0.35,
-          vehicleRisk: 0.04,
-          fusedRisk: 0.32,
+          driverRisk: 0.42,
+          vehicleRisk: 0.02,
+          fusedRisk: 0.38,
           level: RISK_LEVELS.NOTICE,
-          confidence: 0.90,
+          confidence: 0.92,
           factors: [
             {
               id: 'eyes_off_road',
-              label: 'Driver Inattention / Off-Road',
+              label: 'Attention Drift / Head Turned',
               contribution: 0.80,
-              evidence: 'Gaze off road 2.5 s (Yaw +32°)',
+              evidence: 'Head yaw 32.0° away for 2.5 s (threshold 2.0 s)',
             },
           ],
-          explanation: 'Driver looking away from the roadway for >2.0s. Soft visual notice active.',
+          explanation: 'Driver head turned 32.0° away from forward roadway for 2.5s.',
           compoundEscalation: false,
         };
         setRiskAssessment(assessment);
@@ -185,11 +381,15 @@ export const App: React.FC = () => {
       default: {
         setSimulatorPreset('NORMAL');
         updateDriverFeatures({
+          faceDetected: true,
+          quality: 0.95,
           ear: 0.28,
           longClosureSec: 0.0,
           perclos60: 0.04,
-          yawning: false,
+          headPitch: 0.0,
           headYaw: 0.0,
+          headRoll: 0.0,
+          yawning: false,
           eyesOffRoadSec: 0.0,
         });
         const assessment = {
@@ -224,7 +424,7 @@ export const App: React.FC = () => {
         className="fixed top-4 right-4 z-40 flex items-center gap-3 px-3 py-1.5 rounded-lg bg-gray-900/90 border border-gray-700/60 backdrop-blur shadow-xl text-xs font-mono"
       >
         <div className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+          <span className={`w-2 h-2 rounded-full ${cameraStatus === 'active' ? 'bg-blue-400 animate-pulse' : 'bg-gray-500'}`} />
           <span className="text-gray-400">Delegate:</span>
           <span className="text-blue-300 font-semibold">{activeDelegate}</span>
         </div>
@@ -248,25 +448,35 @@ export const App: React.FC = () => {
                 Co-Pilot MVP
               </span>
             </div>
-            <p className="text-xs text-gray-400">
-              One AI. Driver-Aware. Vehicle-Aware. Safety-Driven.
-            </p>
+            <p className="text-xs text-gray-400">Driver-Aware &amp; Vehicle-Aware Safety Co-Pilot</p>
           </div>
         </div>
 
-        {/* Global Controls & Privacy Badge */}
+        {/* Global Action & Guardrail Ribbon */}
         <div className="flex flex-wrap items-center gap-3">
           <PrivacyBadge />
 
+          {/* Quick Start Camera if stopped */}
+          {cameraStatus !== 'active' && (
+            <button
+              onClick={startCamera}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow transition-colors"
+            >
+              <Camera className="w-3.5 h-3.5" />
+              <span>Start Camera</span>
+            </button>
+          )}
+
+          {/* Calibration Trigger */}
           <button
             onClick={() => setIsCalibrationOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs text-gray-200 border border-gray-700 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-xs font-medium text-gray-200 transition-colors"
           >
             <RotateCcw className="w-3.5 h-3.5 text-blue-400" />
             <span>Calibrate Baseline</span>
           </button>
 
-          {/* Sound Mute Toggle */}
+          {/* Audio Chimes Mute Toggle */}
           <button
             onClick={() => setAudioMuted(!audioMuted)}
             className={`p-2 rounded-lg border text-xs transition-colors ${
@@ -333,7 +543,18 @@ export const App: React.FC = () => {
       <main className="max-w-7xl w-full grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Column (5 cols): Live Vision Panel & Driver Gauges */}
         <section className="lg:col-span-5 flex flex-col space-y-6">
-          <LivePanel fps={fps} delegate={activeDelegate} />
+          <LivePanel
+            videoRef={videoRef}
+            canvasRef={canvasRef}
+            fps={fps}
+            delegate={activeDelegate}
+            cameraStatus={cameraStatus}
+            cameraError={cameraError}
+            hideVideo={hideVideo}
+            onToggleHideVideo={() => setHideVideo(!hideVideo)}
+            onStartCamera={startCamera}
+            onStopCamera={stopCamera}
+          />
           <DriverGauges />
         </section>
 
@@ -355,6 +576,8 @@ export const App: React.FC = () => {
       <CalibrationWizard
         isOpen={isCalibrationOpen}
         onClose={() => setIsCalibrationOpen(false)}
+        isCameraActive={cameraStatus === 'active'}
+        onStartCamera={startCamera}
       />
 
       {/* Footer Disclaimer */}

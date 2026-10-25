@@ -1,21 +1,35 @@
 import React, { useEffect, useRef } from 'react';
-import { Target, CheckCircle2, RotateCcw, X, Sparkles } from 'lucide-react';
+import { Target, CheckCircle2, RotateCcw, X, Sparkles, Camera } from 'lucide-react';
 import { useNeuroDriveStore } from './store';
-import { PersonalBaseline } from '../core/types';
+import { CalibrationMode } from '../core/types';
 import { CONFIG } from '../core/config';
+import {
+  createCalibrationSession,
+  addCalibrationSample,
+  saveBaselineToStorage,
+  CalibrationSession,
+} from '../core/baseline/calibration';
 
 interface CalibrationWizardProps {
   isOpen: boolean;
   onClose: () => void;
+  isCameraActive?: boolean;
+  onStartCamera?: () => Promise<void> | void;
 }
 
-export const CalibrationWizard: React.FC<CalibrationWizardProps> = ({ isOpen, onClose }) => {
+export const CalibrationWizard: React.FC<CalibrationWizardProps> = ({
+  isOpen,
+  onClose,
+  isCameraActive = false,
+  onStartCamera,
+}) => {
   const {
     calibrationStatus,
     calibrationMode,
     calibrationProgress,
     calibrationCountdownSec,
     activeBaseline,
+    driverFeatures,
     startCalibration,
     tickCalibration,
     completeCalibration,
@@ -23,7 +37,20 @@ export const CalibrationWizard: React.FC<CalibrationWizardProps> = ({ isOpen, on
     loadSavedBaseline,
   } = useNeuroDriveStore();
 
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const sessionRef = useRef<CalibrationSession | null>(null);
+  const sampleTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleStartCalibration = async (mode: CalibrationMode) => {
+    if (!isCameraActive && onStartCamera) {
+      try {
+        await onStartCamera();
+      } catch (err) {
+        console.warn('[CalibrationWizard] Could not auto-start camera for calibration:', err);
+      }
+    }
+    sessionRef.current = createCalibrationSession(mode, Date.now());
+    startCalibration(mode);
+  };
 
   useEffect(() => {
     if (calibrationStatus === 'calibrating') {
@@ -32,40 +59,41 @@ export const CalibrationWizard: React.FC<CalibrationWizardProps> = ({ isOpen, on
           ? CONFIG.calibration.demoDurationSec
           : CONFIG.calibration.fullDurationSec;
 
-      let remaining = calibrationCountdownSec;
+      if (!sessionRef.current) {
+        sessionRef.current = createCalibrationSession(calibrationMode, Date.now());
+      }
 
-      timerRef.current = setInterval(() => {
-        remaining -= 1;
-        const progress = Math.min(100, Math.round(((totalSec - remaining) / totalSec) * 100));
+      // Sample every 100ms from live driver features
+      sampleTimerRef.current = setInterval(() => {
+        const currentDriver = useNeuroDriveStore.getState().driverFeatures;
+        if (sessionRef.current) {
+          const progressResult = addCalibrationSample(sessionRef.current, {
+            ear: currentDriver.ear,
+            mar: currentDriver.mar,
+            headPitch: currentDriver.headPitch,
+            headYaw: currentDriver.headYaw,
+            quality: currentDriver.quality,
+            blinkRate: currentDriver.blinkRate,
+            timestamp: Date.now(),
+          });
 
-        if (remaining <= 0) {
-          if (timerRef.current) clearInterval(timerRef.current);
+          const remaining = Math.max(0, Math.ceil(totalSec - progressResult.elapsedSec));
+          const pct = Math.min(100, Math.round(progressResult.progress * 100));
 
-          // Build calibrated baseline
-          const baseline: PersonalBaseline = {
-            id: `baseline_${Date.now()}`,
-            calibratedAt: Date.now(),
-            mode: calibrationMode,
-            earOpenBaseline: 0.30,
-            earThreshold: Number((0.30 * CONFIG.calibration.earMultiplier).toFixed(3)),
-            marClosedBaseline: 0.20,
-            headPitchOffset: 0.0,
-            headYawOffset: 0.0,
-            normalBlinkRate: 18,
-            vibrationBaselineRms: CONFIG.vehicle.normalVibrationRms,
-            audioBaselineRms: CONFIG.vehicle.normalAudioRms,
-            isComplete: true,
-          };
-
-          completeCalibration(baseline);
-        } else {
-          tickCalibration(remaining, progress);
+          if (progressResult.isComplete && progressResult.session.result) {
+            if (sampleTimerRef.current) clearInterval(sampleTimerRef.current);
+            const baseline = progressResult.session.result;
+            saveBaselineToStorage(baseline);
+            completeCalibration(baseline);
+          } else {
+            tickCalibration(remaining, pct);
+          }
         }
-      }, 1000);
+      }, 100);
     }
 
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (sampleTimerRef.current) clearInterval(sampleTimerRef.current);
     };
   }, [calibrationStatus, calibrationMode, completeCalibration, tickCalibration]);
 
@@ -93,21 +121,29 @@ export const CalibrationWizard: React.FC<CalibrationWizardProps> = ({ isOpen, on
           <div>
             <h2 className="text-lg font-bold text-white">Driver Baseline Calibration</h2>
             <p className="text-xs text-gray-400">
-              Calibrates neutral eye aperture, resting head pose, and cabin ambient profile.
+              Calibrates neutral eye aperture, resting head pose, and personal safety thresholds.
             </p>
           </div>
         </div>
+
+        {/* Camera Warning If Inactive */}
+        {!isCameraActive && calibrationStatus === 'idle' && (
+          <div className="flex items-center gap-2 p-2.5 rounded-lg bg-amber-950/40 border border-amber-500/40 text-amber-300 text-xs">
+            <Camera className="w-4 h-4 shrink-0" />
+            <span>Webcam is currently off. Starting calibration will automatically request camera access.</span>
+          </div>
+        )}
 
         {/* Calibration Content State */}
         {calibrationStatus === 'idle' && (
           <div className="space-y-4">
             <p className="text-xs text-gray-300 leading-relaxed">
-              Sit in your natural driving posture and look forward at the road. Select a calibration mode to begin:
+              Sit in your natural driving posture and look forward at the screen. Select a calibration mode to begin:
             </p>
 
             <div className="grid grid-cols-2 gap-3">
               <button
-                onClick={() => startCalibration('demo_15s')}
+                onClick={() => handleStartCalibration('demo_15s')}
                 className="p-3.5 rounded-xl border border-blue-500/40 bg-blue-950/30 hover:bg-blue-900/40 text-left transition-all group"
               >
                 <div className="flex items-center gap-2 text-sm font-semibold text-blue-300 group-hover:text-blue-200">
@@ -115,12 +151,12 @@ export const CalibrationWizard: React.FC<CalibrationWizardProps> = ({ isOpen, on
                   15s Demo Mode
                 </div>
                 <div className="text-[11px] text-gray-400 mt-1">
-                  Fast calibration for quick demonstration and testing.
+                  Fast live calibration for quick demonstration and testing.
                 </div>
               </button>
 
               <button
-                onClick={() => startCalibration('full_60s')}
+                onClick={() => handleStartCalibration('full_60s')}
                 className="p-3.5 rounded-xl border border-gray-700 bg-gray-800/40 hover:bg-gray-800/80 text-left transition-all group"
               >
                 <div className="flex items-center gap-2 text-sm font-semibold text-gray-200 group-hover:text-white">
@@ -135,7 +171,7 @@ export const CalibrationWizard: React.FC<CalibrationWizardProps> = ({ isOpen, on
 
             <div className="pt-2 flex items-center justify-between border-t border-gray-800">
               <span className="text-xs text-gray-500 font-mono">
-                Current: {activeBaseline.mode} (EAR {activeBaseline.earThreshold})
+                Current Threshold: EAR {activeBaseline.earThreshold.toFixed(3)}
               </span>
               <button
                 onClick={() => {
@@ -151,77 +187,85 @@ export const CalibrationWizard: React.FC<CalibrationWizardProps> = ({ isOpen, on
         )}
 
         {calibrationStatus === 'calibrating' && (
-          <div className="space-y-4 py-2">
+          <div className="space-y-5 py-2">
             <div className="text-center space-y-1">
-              <div className="text-3xl font-bold font-mono text-blue-400">
+              <div className="text-4xl font-extrabold text-white font-mono tracking-tight">
                 {calibrationCountdownSec}s
               </div>
-              <div className="text-xs text-gray-300 font-medium">
-                Hold normal driving pose and look straight ahead...
-              </div>
+              <p className="text-xs text-gray-300">
+                Please look straight ahead naturally. Sampling eye aperture and head pose...
+              </p>
             </div>
 
             {/* Progress Bar */}
-            <div className="space-y-1">
-              <div className="w-full bg-gray-800 h-3 rounded-full overflow-hidden">
+            <div className="space-y-1.5">
+              <div className="flex justify-between text-[11px] font-mono text-gray-400">
+                <span>Calibrating ({calibrationMode === 'demo_15s' ? '15s Demo' : '60s Full'})</span>
+                <span className="text-blue-400">{calibrationProgress}%</span>
+              </div>
+              <div className="h-2.5 w-full bg-gray-800 rounded-full overflow-hidden">
                 <div
-                  className="bg-blue-500 h-full transition-all duration-300"
+                  className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all duration-200"
                   style={{ width: `${calibrationProgress}%` }}
                 />
               </div>
-              <div className="flex justify-between text-[10px] font-mono text-gray-500">
-                <span>Mode: {calibrationMode}</span>
-                <span>{calibrationProgress}%</span>
-              </div>
             </div>
 
-            <div className="flex justify-end pt-2">
-              <button
-                onClick={cancelCalibration}
-                className="px-3 py-1 text-xs text-gray-400 hover:text-white bg-gray-800 rounded-lg transition-colors"
-              >
-                Cancel
-              </button>
+            {/* Real-Time Live Feed Sample Readout */}
+            <div className="p-3 rounded-xl bg-gray-950/80 border border-gray-800 text-[11px] font-mono grid grid-cols-2 gap-2 text-gray-400">
+              <div>Live EAR: <span className="text-white font-semibold">{driverFeatures.ear.toFixed(3)}</span></div>
+              <div>Live Pitch: <span className="text-white font-semibold">{driverFeatures.headPitch.toFixed(1)}°</span></div>
+              <div>Face Quality: <span className="text-white font-semibold">{(driverFeatures.quality * 100).toFixed(0)}%</span></div>
+              <div>Live Yaw: <span className="text-white font-semibold">{driverFeatures.headYaw.toFixed(1)}°</span></div>
             </div>
+
+            <button
+              onClick={() => cancelCalibration()}
+              className="w-full py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-medium transition-colors"
+            >
+              Cancel Calibration
+            </button>
           </div>
         )}
 
         {calibrationStatus === 'complete' && (
-          <div className="space-y-4 text-center py-2">
-            <div className="w-12 h-12 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center mx-auto">
+          <div className="space-y-5 text-center py-2">
+            <div className="w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center justify-center mx-auto">
               <CheckCircle2 className="w-6 h-6" />
             </div>
-            <div>
-              <h3 className="text-base font-bold text-white">Calibration Complete!</h3>
-              <p className="text-xs text-gray-400 mt-1">
-                Personalized thresholds bound to your eye shape and posture.
+
+            <div className="space-y-1">
+              <h3 className="text-base font-bold text-white">Calibration Successful!</h3>
+              <p className="text-xs text-gray-400">
+                Your personal baseline profile has been saved and applied to all risk thresholds.
               </p>
             </div>
 
-            <div className="bg-gray-950/60 p-3 rounded-xl border border-gray-800 grid grid-cols-2 gap-2 text-left text-xs font-mono">
-              <div>
-                <span className="text-gray-500">Open EAR:</span>{' '}
-                <span className="text-emerald-400 font-bold">{activeBaseline.earOpenBaseline}</span>
+            {/* Calibrated Values Summary */}
+            <div className="p-3.5 rounded-xl bg-gray-950/60 border border-gray-800/80 text-left font-mono text-xs space-y-1.5">
+              <div className="flex justify-between">
+                <span className="text-gray-400">Baseline Open-Eye EAR:</span>
+                <span className="text-emerald-400 font-semibold">{activeBaseline.earOpenBaseline.toFixed(3)}</span>
               </div>
-              <div>
-                <span className="text-gray-500">Closure Threshold:</span>{' '}
-                <span className="text-yellow-400 font-bold">{activeBaseline.earThreshold}</span>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Derived Closure Threshold:</span>
+                <span className="text-blue-400 font-semibold">{activeBaseline.earThreshold.toFixed(3)}</span>
               </div>
-              <div>
-                <span className="text-gray-500">Resting MAR:</span>{' '}
-                <span className="text-cyan-400 font-bold">{activeBaseline.marClosedBaseline}</span>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Neutral Head Pitch Offset:</span>
+                <span className="text-gray-200">{activeBaseline.headPitchOffset.toFixed(1)}°</span>
               </div>
-              <div>
-                <span className="text-gray-500">Neutral Blinks:</span>{' '}
-                <span className="text-purple-400 font-bold">{activeBaseline.normalBlinkRate}/min</span>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Neutral Head Yaw Offset:</span>
+                <span className="text-gray-200">{activeBaseline.headYawOffset.toFixed(1)}°</span>
               </div>
             </div>
 
             <button
               onClick={onClose}
-              className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs transition-colors shadow-lg shadow-blue-600/20"
+              className="w-full py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow transition-colors"
             >
-              Start Monitoring with Baseline
+              Done &amp; Resume Driving
             </button>
           </div>
         )}

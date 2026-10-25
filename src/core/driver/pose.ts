@@ -26,18 +26,25 @@ export interface HeadPose {
   roll: number;  // + tilt right, - tilt left
 }
 
+export type MatrixInput = number[] | Float32Array | number[][] | { data: Float32Array | number[] };
+
 /**
  * Extracts 3x3 rotation matrix R[row][col] from a 16-element 4x4 matrix or 2D array.
  */
 export function extractRotationMatrix(
-  matrix: number[] | Float32Array | number[][]
+  matrix: MatrixInput
 ): [
   [number, number, number],
   [number, number, number],
   [number, number, number]
 ] {
-  if (Array.isArray(matrix) && Array.isArray(matrix[0])) {
-    const m = matrix as number[][];
+  // Unwrap MediaPipe Matrix object if needed
+  const raw = (matrix && typeof matrix === 'object' && 'data' in matrix)
+    ? (matrix as { data: Float32Array | number[] }).data
+    : matrix;
+
+  if (Array.isArray(raw) && Array.isArray(raw[0])) {
+    const m = raw as number[][];
     return [
       [m[0][0], m[0][1], m[0][2]],
       [m[1][0], m[1][1], m[1][2]],
@@ -45,9 +52,9 @@ export function extractRotationMatrix(
     ];
   }
 
-  const flat = matrix as number[] | Float32Array;
-  if (flat.length < 16) {
-    throw new Error(`Invalid transformation matrix length: ${flat.length}. Expected 16 elements.`);
+  const flat = raw as number[] | Float32Array;
+  if (!flat || flat.length < 16) {
+    throw new Error(`Invalid transformation matrix length: ${flat?.length}. Expected 16 elements.`);
   }
 
   // Column-major 4x4 matrix:
@@ -86,7 +93,7 @@ const RAD2DEG = 180 / Math.PI;
  * R[1][0] / R[1][1] = (cp*sr) / (cp*cr) = tan(roll) => roll = atan2(R[1][0], R[1][1])
  */
 export function calculateHeadPose(
-  matrix: number[] | Float32Array | number[][]
+  matrix: MatrixInput
 ): HeadPose {
   const R = extractRotationMatrix(matrix);
 

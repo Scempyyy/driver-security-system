@@ -16,13 +16,13 @@ import { CONFIG, DEFAULT_BASELINE_PROFILE } from '../config';
 import { calculateEAR, Point2D } from './ear';
 import { calculateMAR } from './mar';
 import { calculateGaze } from './gaze';
-import { calculateHeadPose, HeadPose } from './pose';
+import { calculateHeadPose, HeadPose, MatrixInput } from './pose';
 import { PerclosTracker } from './perclos';
 import { BlinkTracker } from './blink';
 
 export interface RawLandmarkData {
   landmarks?: Point2D[];
-  matrix?: number[] | Float32Array | number[][];
+  matrix?: MatrixInput;
   timestampMs?: number;
 }
 
