@@ -73,16 +73,26 @@ export const SimulatedFamilyNotification: React.FC = () => {
     const message = `🚨 NEURODRIVE CRITICAL SOS: Driver is unresponsive to safety alarms (>3s). Reason: ${explanation || 'Distraction / Drowsiness'}. Live GPS coordinates: ${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)}. Immediate safety check requested.`;
 
     try {
-      const response = await fetch(`https://ntfy.sh/${ntfyTopic}`, {
+      const response = await fetch('https://ntfy.sh', {
         method: 'POST',
         headers: {
-          'Title': '🚨 EMERGENCY: Driver Unresponsive (>3s)',
-          'Priority': 'urgent', // 5 / urgent: rings phone loud with vibration (bypasses DND)
-          'Tags': 'rotating_light,sos,warning,car',
-          'Click': mapsUrl,
-          'Actions': `view, Open Live GPS Map, ${mapsUrl}`,
+          'Content-Type': 'application/json',
         },
-        body: message,
+        body: JSON.stringify({
+          topic: ntfyTopic,
+          title: '🚨 EMERGENCY: Driver Unresponsive (>3s)',
+          message,
+          priority: 5, // 5 = urgent: rings phone loud with vibration, bypasses DND
+          tags: ['rotating_light', 'sos', 'warning', 'car'],
+          click: mapsUrl,
+          actions: [
+            {
+              action: 'view',
+              label: 'Open Live GPS Map',
+              url: mapsUrl,
+            },
+          ],
+        }),
       });
 
       if (response.ok) {
@@ -92,8 +102,7 @@ export const SimulatedFamilyNotification: React.FC = () => {
       }
     } catch (err) {
       console.warn('[ntfy Emergency Dispatch] Network error:', err);
-      // Still show dispatch in UI even if offline
-      setDeliveryStatus('delivered');
+      setDeliveryStatus('error');
     }
   };
 
