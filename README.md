@@ -160,6 +160,28 @@ The TypeScript test suite verifies metric formulas, baseline calibrations, and a
 
 ---
 
+## 👥 Contributors & Activity Graph
+
+<div align="center">
+
+[![Contributors](https://img.shields.io/github/contributors/Scempyyy/driver-security-system?style=for-the-badge&color=0284C7)](https://github.com/Scempyyy/driver-security-system/graphs/contributors)
+[![Commit Activity](https://img.shields.io/github/commit-activity/m/Scempyyy/driver-security-system?style=for-the-badge&color=10B981)](https://github.com/Scempyyy/driver-security-system/pulse)
+[![Last Commit](https://img.shields.io/github/last-commit/Scempyyy/driver-security-system?style=for-the-badge&color=6366F1)](https://github.com/Scempyyy/driver-security-system/commits/main)
+
+<br/><br/>
+
+<a href="https://github.com/Scempyyy/driver-security-system/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Scempyyy/driver-security-system" alt="NeuroDrive AI Contributors" />
+</a>
+
+<br/><br/>
+
+[📊 View Full Repository Insights & Contribution Graph →](https://github.com/Scempyyy/driver-security-system/graphs/contributors)
+
+</div>
+
+---
+
 ## 📄 License
 
 This project is licensed under the [MIT License](LICENSE).
