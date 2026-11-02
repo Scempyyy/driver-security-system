@@ -25,3 +25,7 @@ techfestthing/emergency_log.txt
 Thumbs.db
 .vscode/
 .idea/
+
+__pycache__/
+*.pyc
+
