@@ -1,11 +1,20 @@
-# NeuroDrive AI
+# driver-security-system (NeuroDrive AI)
 
-> **One AI. Driver-Aware. Vehicle-Aware. Safety-Driven.**  
-> *A hackathon MVP safety co-pilot.*
+A computer-vision and sensor-fusion safety system for monitoring driver attention, drowsiness, and vehicle signals.
 
-NeuroDrive AI continuously observes the driver (drowsiness, attention drift) and vehicle signals (vibration, cabin audio) together, fuses them into ONE explainable risk score, and provides adaptive, tiered alerts.
+## Overview
+Built around Python, MediaPipe, OpenCV, TypeScript, and Vite, the project explores facial landmarks, eye behavior (EAR/MAR/PERCLOS), and vehicle telemetry to estimate attention signals in real time with an explainable risk engine.
 
-**The Pitch:** *"A drowsy driver in a vehicle with a developing fault is far riskier than either alone. NeuroDrive AI sees both, compound-escalates the alert, and explicitly tells you why."*
+## Core Capabilities
+- **Face & Landmark Detection**: 478 face landmarks in real-time using MediaPipe.
+- **Attention & Drowsiness Metrics**: Eye Aspect Ratio (EAR), Mouth Aspect Ratio (MAR), PERCLOS, blink rate, and 3D head pose/gaze tracking.
+- **Sensor Fusion**: Combines driver attention state with vehicle vibration and acoustic cues into an explainable risk score.
+- **Tiered Alerts**: Adaptive visual notices, natural voice alerts, and silence controls.
+- **Dual Runtimes**:
+  - `techfestthing/`: Standalone Python prototype (`drowsiness.py`) using OpenCV and MediaPipe.
+  - `src/`: Interactive TypeScript/React dashboard with webcam MediaPipe integration and simulation tools.
+
+> This is an experimental prototype, not a certified automotive safety system.
 
 ---
 
@@ -15,8 +24,9 @@ NeuroDrive AI continuously observes the driver (drowsiness, attention drift) and
 - **Node.js**: `v20.x` or `v22.x` (LTS recommended, see `.nvmrc`)
 - **npm**: `v9.x` or higher
 - **Webcam**: Standard USB or built-in webcam
+- **Python**: 3.10+ (for standalone `techfestthing` scripts)
 
-### Quick Start (Arch Linux & Windows 10/11)
+### Quick Start (Web Dashboard)
 
 ```bash
 # 1. Clean reproducible install (runs postinstall asset copier automatically)
@@ -34,106 +44,61 @@ npm run dev
 
 The application will be accessible at: `http://localhost:5173/`
 
+### Standalone Python Prototype (`techfestthing/`)
+
+```bash
+cd techfestthing
+pip install -r requirements.txt
+python drowsiness.py
+```
+
 ---
 
-### Platform-Specific Instructions
+## Platform-Specific Instructions
 
-#### 1. Arch Linux Setup
+### 1. Arch Linux Setup
 - **Camera Access & Permissions:**
   Ensure your user account is in the `video` group:
   ```bash
   sudo usermod -aG video $USER
   ```
-  *(Log out and log back in for changes to take effect).*
   Verify the camera device node exists:
   ```bash
   ls -la /dev/video*
   ```
 - **Optional Speech Synthesis Support:**
-  Chromium/Brave/Firefox on Arch use `speech-dispatcher` for Web Speech API (`window.speechSynthesis`). If you want spoken voice alerts in addition to the built-in bundled Web Audio clips:
+  If you want browser spoken voice alerts in addition to the bundled PCM Web Audio clips:
   ```bash
   sudo pacman -S speech-dispatcher espeak-ng
   spd-say "NeuroDrive audio test"
   ```
-  *(Note: NeuroDrive AI bundles offline PCM WAV clips that play immediately via Web Audio without needing external speech engines).*
 
-#### 2. Windows 10 / 11 Setup
+### 2. Windows 10 / 11 Setup
 - **Camera Privacy Settings:**
   1. Open **Windows Settings** (`Win + I`).
   2. Navigate to **Privacy & security** → **Camera**.
-  3. Ensure **Camera access** is toggled **ON**, and **Let desktop apps access your camera** is enabled for your browser (Chrome/Edge/Brave).
-- **WSL2 Note:**
-  If developing inside WSL2, run the Vite dev server inside WSL2 and open the browser on Windows (`http://localhost:5173/`), or attach USB cameras to WSL2 using `usbipd-win`. Running directly in native Windows PowerShell/CMD works out-of-the-box.
-
----
-
-### Mobile Phone Testing (Over HTTPS)
-
-To test on an iPhone or Android phone connected to the same Wi-Fi network (enabling phone accelerometer `DeviceMotion` and microphone access):
-
-```bash
-npm run dev:https
-```
-1. Open the displayed HTTPS network address on your phone (e.g. `https://192.168.1.X:5173/`).
-2. Accept the local self-signed development certificate.
-3. Grant camera and motion sensor permissions.
+  3. Ensure **Camera access** is toggled **ON**, and **Let desktop apps access your camera** is enabled for your browser.
 
 ---
 
 ## System Architecture
 
 ```
-src/
-  core/                     # Pure TS, NO DOM access, 100% unit-testable
-    types.ts                # Shared contracts (DriverFeatures, VehicleFeatures, RiskAssessment, Alert)
-    config.ts               # ALL thresholds, weights, and timings (no magic numbers)
-    paths.ts                # Cross-platform asset URL resolver (import.meta.env.BASE_URL)
-    driver/                 # EAR, MAR, PERCLOS, blink rate, 3D head pose, gaze
-    vehicle/                # Audio RMS + band bars, accelerometer RMS, simulator
-    baseline/               # 15s/60s calibration + bounded adaptation
-    fusion/                 # Risk engine, compound escalation, explanation builder
-  io/                       # Browser adapters
-    camera/                 # MediaPipe FaceLandmarker loader (GPU with CPU auto-fallback)
-    audio/                  # Web Audio input & simple 3-band energy
-    motion/                 # DeviceMotion accelerometer listener
-    speech/                 # Bundled Web Audio sound player + optional TTS
-  ui/                       # Passenger dashboard & explainable UI
-  tests/                    # Vitest unit & scenario tests
+nuerodrive/
+├── techfestthing/          # Original Python/OpenCV/MediaPipe standalone module
+│   ├── drowsiness.py       # Core PERCLOS / EAR / MAR detection
+│   ├── ad.py               # Attention detector
+│   ├── face_landmarker.task
+│   └── requirements.txt
+├── src/
+│   ├── core/               # TypeScript contracts, risk fusion engine, baseline
+│   ├── io/                 # MediaPipe FaceLandmarker loader, Web Audio, camera
+│   ├── ui/                 # Real-time passenger dashboard
+│   └── tests/              # Vitest unit & scenario tests
 ```
 
 ---
 
 ## Guardrails & Privacy Guarantee
-
-- **100% On-Device:** Video frames are processed in-memory in the browser sandbox. No video or sensor data ever leaves your device or touches any cloud server.
-- **Honesty & Safety:** Displays an explicit prototype notice: *"Prototype. Not a certified safety system. Estimates risk."*
-- **Explainability:** Every alert produces a "Why" card citing the top 3 contributing signals with real numeric measurements.
-
-
----
-
-## 90-Second Hackathon Demo Script
-
-Follow this sequence for a reliable, judges-ready presentation:
-
-1. **Launch & Privacy Guarantee (0–15s):**
-   - Run `npm run dev` and navigate to `http://localhost:5173/`.
-   - Click **"Start Camera"** and grant webcam permission. Point out the mirrored video, live face mesh overlay, and the persistent badge: **"On-device processing • No video leaves device"**.
-   - Select **"Calibrate Baseline"** (15s Quick Demo Calibration), or click **"Skip / Load Saved Profile"** for instant activation.
-2. **Normal State (15–30s):**
-   - Look straight ahead with eyes open. Blink normally: point out that ordinary blinks under 0.5s are completely ignored and do not trigger alarms.
-   - Point out the indicators: Driver Risk low, Vehicle Signals nominal (`NORMAL`), Fused Risk = `0 NORMAL`.
-3. **Continuous Closure & Silent Notice (30–45s):**
-   - Close eyes continuously for **2.0 seconds**: A silent yellow **NOTICE** visual banner triggers (no audio or voice).
-   - Point out the "Why" card explaining: *"Eyes closed 2.0 s"*.
-4. **Compound Escalation (The Hackathon Winner!) (45–65s):**
-   - While in the NOTICE state (eyes closed or slow blinks), click **"Brake Judder"** in the Vehicle Signal Simulator.
-   - The system immediately compound-escalates to **`2 WARNING`** (warning chime + spoken natural voice: *"You seem drowsy. Please take a break soon."*).
-   - Show the explanation card:
-     > *"Prolonged Eye Closure (2.0s) + Abnormal Vehicle Vibration for 2.0s. Risk raised because both appear together."*
-5. **Critical Microsleep & Silence Alarm (65–80s):**
-   - Keep eyes closed continuously for **5.0 seconds**: The system escalates to **`3 CRITICAL`** (urgent siren + *"Pull over safely."*).
-   - Point out the prominent red **"Silence Alarm"** banner. Press **`Space`** (or **`Esc`**) or click the button: sound and voice immediately stop, and the alert is marked acknowledged.
-6. **Volume Control & Post-Trip Review (80–90s):**
-   - Open the header **Volume Settings** popup: show master slider, alarm sound / voice sliders, mute toggle (shortcut **`M`**), and click **"Test Sound & Voice"**.
-   - Review the **Risk Timeline (Recharts)** showing the compound risk spike, and inspect historical items in the **Alert Log**.
+- **100% On-Device:** Video frames are processed in-memory in the browser/client sandbox. No video or sensor data leaves your device.
+- **Explainability:** Alerts provide an itemized breakdown of contributing signals with real numeric measurements.
